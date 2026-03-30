@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #2563eb; /* blue-600 */
+  --color-primary-foreground: #ffffff;
+  --color-muted: #f3f4f6; /* gray-100 */
+  --color-destructive: #ef4444; /* red-500 */
+  --color-background: #f9fafb; /* gray-50 */
+}
+
+@layer base {
+  body {
+    @apply bg-background text-gray-900 antialiased;
+  }
+}
+
+/* Base custom styles for rich interactions - LIGHT MODE */
+.glass-panel {
+  @apply bg-white border border-gray-200 shadow-sm rounded-xl;
+}
+
+.input-field {
+  @apply w-full bg-white border border-gray-300 rounded-lg px-4 py-2.5 text-sm text-gray-900 outline-none transition-all duration-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 hover:border-gray-400 placeholder:text-gray-400;
+}
+
+.primary-btn {
+  @apply bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-lg transition-colors shadow-sm shadow-blue-500/20 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2;
+}
+
+.secondary-btn {
+  @apply bg-white hover:bg-gray-50 text-gray-700 font-medium py-2.5 px-4 rounded-lg transition-colors border border-gray-300 shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2;
+}
