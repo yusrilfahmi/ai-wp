@@ -1,28 +1,27 @@
 'use server'
 
 import { getSettings } from '@/app/actions/settings'
+import { getActiveWpSite, parseWpSites, parseApiKeys } from '@/lib/settings-parser'
 
-import { getActiveWpSite } from '@/lib/settings-parser'
-
-export async function getWpCategoriesAction() {
+export async function getWpCategoriesAction(wpSiteId?: string) {
   try {
     const settings = await getSettings()
     if (!settings) return { error: 'Settings not configured' }
 
-    const activeWp = getActiveWpSite(settings.wp_site_url, settings.wp_username, settings.wp_app_password)
+    const allSites = parseWpSites(settings.wp_site_url, settings.wp_username, settings.wp_app_password)
+    const activeWp = wpSiteId
+      ? (allSites.find(s => s.id === wpSiteId) || getActiveWpSite(settings.wp_site_url, settings.wp_username, settings.wp_app_password))
+      : getActiveWpSite(settings.wp_site_url, settings.wp_username, settings.wp_app_password)
     
     if (!activeWp || !activeWp.url || !activeWp.username || !activeWp.password) {
       return { error: 'WordPress settings are not fully configured' }
     }
 
     const authHeader = `Basic ${Buffer.from(`${activeWp.username}:${activeWp.password}`).toString('base64')}`
-    
-    // Fetch categories with high per_page to ensure we capture most/all of them
     const categoryUrl = new URL('/wp-json/wp/v2/categories?per_page=100', activeWp.url)
     
     const res = await fetch(categoryUrl.toString(), {
       headers: { Authorization: authHeader },
-      // Use next.js caching if preferred, but 'no-store' ensures live data
       cache: 'no-store' 
     })
 
@@ -31,8 +30,6 @@ export async function getWpCategoriesAction() {
     }
 
     const categoriesRaw = await res.json()
-    
-    // Map to a clean object array
     const categories: Array<{ id: number, name: string }> = categoriesRaw.map((c: any) => ({
       id: c.id,
       name: c.name
@@ -43,5 +40,46 @@ export async function getWpCategoriesAction() {
   } catch (error) {
     console.error('getWpCategoriesAction error:', error)
     return { error: error instanceof Error ? error.message : 'Server error occurred while fetching WP Categories' }
+  }
+}
+
+/** Returns the list of configured WP sites for the dropdown selector */
+export async function getWpSiteOptionsAction() {
+  try {
+    const settings = await getSettings()
+    if (!settings) return { error: 'Settings not configured' }
+
+    const sites = parseWpSites(settings.wp_site_url, settings.wp_username, settings.wp_app_password)
+    return {
+      data: sites.map(s => ({ id: s.id, label: s.label, is_active: s.is_active }))
+    }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Server error' }
+  }
+}
+
+/** Returns the list of configured Gemini / OpenRouter API key options for the dropdown selector */
+export async function getApiKeyOptionsAction() {
+  try {
+    const settings = await getSettings()
+    if (!settings) return { error: 'Settings not configured' }
+
+    const geminiKeys = parseApiKeys(settings.gemini_api_key).map(k => ({
+      id: k.id,
+      label: k.label,
+      type: 'gemini' as const,
+      is_active: k.is_active
+    }))
+
+    const orKeys = parseApiKeys(settings.openrouter_api_key).map(k => ({
+      id: k.id,
+      label: k.label,
+      type: 'openrouter' as const,
+      is_active: k.is_active
+    }))
+
+    return { data: { gemini: geminiKeys, openrouter: orKeys, active_model: settings.active_model } }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Server error' }
   }
 }

@@ -1,25 +1,36 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { processContentAction } from '@/app/actions/process-content'
+import { processContentAction, scrapeUrlAction, translateFreeAction } from '@/app/actions/process-content'
 import { draftPostAction } from '@/app/actions/draft-post'
-import { getWpCategoriesAction } from '@/app/actions/get-wp-data'
+import { getWpCategoriesAction, getWpSiteOptionsAction, getApiKeyOptionsAction } from '@/app/actions/get-wp-data'
 import { ImageCropper } from '@/components/image-cropper'
 import { toast } from 'sonner'
-import { Loader2, Image as ImageIcon, Send, Sparkles, Trash2, X } from 'lucide-react'
+import { Loader2, Image as ImageIcon, Send, Sparkles, Trash2, X, Download, Languages } from 'lucide-react'
 
 export function DashboardClient() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [isDrafting, setIsDrafting] = useState(false)
+  const [isScraping, setIsScraping] = useState(false)
+  const [isTranslating, setIsTranslating] = useState(false)
   const [isFetchingData, setIsFetchingData] = useState(true)
   
   // Left form state
   const [categories, setCategories] = useState<{id: number, name: string}[]>([])
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([])
+  // Site / API key selector
+  const [wpSites, setWpSites] = useState<{id: string, label: string, is_active: boolean}[]>([])
+  const [selectedWpSiteId, setSelectedWpSiteId] = useState<string>('')
+  const [apiKeyOptions, setApiKeyOptions] = useState<{id: string, label: string, type: string}[]>([])
+  const [selectedApiKeyId, setSelectedApiKeyId] = useState<string>('')
   const [fixJudul, setFixJudul] = useState('')
   const [linkSumber, setLinkSumber] = useState('')
   const [sumberLain, setSumberLain] = useState('')
   const [highlights, setHighlights] = useState('')
+  // Dual-state text editor
+  const [originalText, setOriginalText] = useState('')
+  const [translatedText, setTranslatedText] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<'original' | 'translated'>('original')
   const [uncroppedFile, setUncroppedFile] = useState<File | null>(null)
   const [thumbnail, setThumbnail] = useState<File | null>(null)
   const [previewMode, setPreviewMode] = useState<'preview' | 'html'>('preview')
@@ -51,6 +62,7 @@ export function DashboardClient() {
 
   const handleClearForm = () => {
     setFixJudul(''); setLinkSumber(''); setSumberLain(''); setHighlights('');
+    setOriginalText(''); setTranslatedText(null); setViewMode('original');
     setSumberGambarType('Instagram'); setSumberGambarUrl('Foto: instagram.com/');
     localStorage.removeItem('ai_wp_draft');
     toast.success('Formulir dibersihkan');
@@ -113,16 +125,104 @@ export function DashboardClient() {
   useEffect(() => {
     async function loadWpData() {
       setIsFetchingData(true)
-      const res = await getWpCategoriesAction()
-      if (res.data) {
-        setCategories(res.data)
+      // Load sites and API key options in parallel
+      const [sitesRes, keysRes, catsRes] = await Promise.all([
+        getWpSiteOptionsAction(),
+        getApiKeyOptionsAction(),
+        getWpCategoriesAction()
+      ])
+      if (sitesRes.data) {
+        setWpSites(sitesRes.data)
+        const activeSite = sitesRes.data.find(s => s.is_active) || sitesRes.data[0]
+        if (activeSite) setSelectedWpSiteId(activeSite.id)
+      }
+      if (keysRes.data) {
+        const allKeys = [
+          ...keysRes.data.gemini.map(k => ({ ...k, type: 'gemini' })),
+          ...keysRes.data.openrouter.map(k => ({ ...k, type: 'openrouter' }))
+        ]
+        setApiKeyOptions(allKeys)
+        // Pick active key for the active model
+        const activeModel = keysRes.data.active_model
+        const activeKey = activeModel === 'openrouter'
+          ? keysRes.data.openrouter.find(k => k.is_active) || keysRes.data.openrouter[0]
+          : keysRes.data.gemini.find(k => k.is_active) || keysRes.data.gemini[0]
+        if (activeKey) setSelectedApiKeyId(activeKey.id)
+      }
+      if (catsRes.data) {
+        setCategories(catsRes.data)
       } else {
-        toast.error(`WP Connection warning: ${res.error || 'Failed to load categories'}`)
+        toast.error(`WP Connection warning: ${catsRes.error || 'Failed to load categories'}`)
       }
       setIsFetchingData(false)
     }
     loadWpData()
   }, [])
+
+  // Reload categories when the selected WP site changes
+  useEffect(() => {
+    if (!selectedWpSiteId) return
+    async function reloadCategories() {
+      setIsFetchingData(true)
+      setCategories([])
+      const res = await getWpCategoriesAction(selectedWpSiteId)
+      if (res.data) setCategories(res.data)
+      setIsFetchingData(false)
+    }
+    reloadCategories()
+  }, [selectedWpSiteId])
+
+  const handleScrape = async () => {
+    if (!linkSumber) {
+      toast.error('Link Sumber wajib diisi untuk menarik teks')
+      return
+    }
+    setIsScraping(true)
+    setOriginalText('')
+    setTranslatedText(null)
+    setViewMode('original')
+    try {
+      const [mainRes, otherRes] = await Promise.all([
+        scrapeUrlAction(linkSumber),
+        sumberLain ? scrapeUrlAction(sumberLain) : Promise.resolve({ text: '' })
+      ])
+      const combined = [
+        `=== KONTEN DARI SUMBER UTAMA (${linkSumber}) ===`,
+        mainRes.text || '[Gagal mengambil konten dari sumber utama]',
+        sumberLain
+          ? `\n=== KONTEN DARI SUMBER LAIN (${sumberLain}) ===\n${otherRes.text || '[Gagal mengambil konten dari sumber lain]'}`
+          : ''
+      ].join('\n').trim()
+      setOriginalText(combined)
+      toast.success('Teks berhasil ditarik! Silakan review dan edit sebelum proses.')
+    } catch {
+      toast.error('Gagal menarik teks dari URL')
+    } finally {
+      setIsScraping(false)
+    }
+  }
+
+  const handleTranslate = async () => {
+    if (!originalText.trim()) {
+      toast.error('Teks Asli kosong — isi dulu dengan Tarik Teks atau paste manual')
+      return
+    }
+    setIsTranslating(true)
+    try {
+      const res = await translateFreeAction(originalText)
+      if (res.error) {
+        toast.error(res.error)
+      } else {
+        setTranslatedText(res.translated || '')
+        setViewMode('translated')
+        toast.success('Teks berhasil diterjemahkan! Tampilan beralih ke Terjemahan.')
+      }
+    } catch {
+      toast.error('Terjemahan gagal — coba lagi')
+    } finally {
+      setIsTranslating(false)
+    }
+  }
 
   const handleProcess = async () => {
     if (!fixJudul || !linkSumber) {
@@ -136,7 +236,10 @@ export function DashboardClient() {
         fixJudul,
         linkSumber,
         sumberLain,
-        highlights
+        highlights,
+        rawScrapedText: viewMode === 'translated' && translatedText ? translatedText : originalText,
+        selectedWpSiteId: selectedWpSiteId || undefined,
+        selectedApiKeyId: selectedApiKeyId || undefined
       })
 
       if (res.error || !res.data) {
@@ -240,6 +343,87 @@ export function DashboardClient() {
                 className="input-field mt-1" placeholder="https://..." 
               />
             </div>
+          </div>
+
+          {/* ACTION BUTTONS: TARIK TEKS + TERJEMAHKAN */}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleScrape}
+              disabled={isScraping || !linkSumber}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border border-blue-400/40 text-blue-400 bg-blue-500/5 hover:bg-blue-500/10 hover:border-blue-400/60 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isScraping ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Menarik Teks...</>
+              ) : (
+                <><Download className="w-4 h-4" /> Tarik Teks dari URL</>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handleTranslate}
+              disabled={isTranslating || !originalText.trim()}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border border-violet-400/40 text-violet-400 bg-violet-500/5 hover:bg-violet-500/10 hover:border-violet-400/60 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isTranslating ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Menerjemahkan...</>
+              ) : (
+                <><Languages className="w-4 h-4" /> Terjemahkan (Gratis)</>
+              )}
+            </button>
+          </div>
+
+          {/* REVIEW & EDIT SCRAPED TEXT — with toggle */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm font-medium text-gray-700">
+                Review &amp; Edit Teks Sumber
+              </label>
+              {/* View Mode Toggle */}
+              <div className="flex bg-gray-100 rounded-md p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('original')}
+                  className={`px-3 py-1 rounded-sm transition-colors font-medium ${
+                    viewMode === 'original'
+                      ? 'bg-white shadow text-blue-600'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  🇬🇧 Teks Asli
+                </button>
+                <button
+                  type="button"
+                  onClick={() => translatedText !== null && setViewMode('translated')}
+                  disabled={translatedText === null}
+                  className={`px-3 py-1 rounded-sm transition-colors font-medium ${
+                    viewMode === 'translated'
+                      ? 'bg-white shadow text-violet-600'
+                      : 'text-gray-500 hover:text-gray-700'
+                  } disabled:opacity-40 disabled:cursor-not-allowed`}
+                >
+                  🇮🇩 Terjemahan
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-amber-600 mb-2">
+              ⚠️ Silakan hapus kalimat iklan atau teks yang tidak relevan sebelum diproses AI.
+              {viewMode === 'translated' && (
+                <span className="ml-2 text-violet-500 font-medium">
+                  (Membaca terjemahan — AI akan menerima teks aktif sesuai tampilan ini)
+                </span>
+              )}
+            </p>
+            <textarea
+              value={viewMode === 'translated' && translatedText !== null ? translatedText : originalText}
+              onChange={e =>
+                viewMode === 'translated'
+                  ? setTranslatedText(e.target.value)
+                  : setOriginalText(e.target.value)
+              }
+              className="w-full min-h-[500px] p-8 text-gray-800 text-lg md:text-xl leading-relaxed md:leading-loose font-serif bg-gray-50 border border-gray-300 rounded-xl shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y whitespace-pre-wrap"
+              placeholder="Klik 'Tarik Teks dari URL' untuk mengisi otomatis, atau ketik/paste teks sumber secara manual di sini..."
+            />
           </div>
 
           <div>
@@ -407,26 +591,68 @@ export function DashboardClient() {
              )}
           </div>
 
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-            <h3 className="text-sm font-medium text-gray-700 mb-2">Pilih Kategori</h3>
-            {isFetchingData ? (
-              <div className="flex items-center gap-2 text-sm text-gray-500 py-1">
-                <Loader2 className="w-4 h-4 animate-spin" /> Fetching...
-              </div>
-            ) : categories.length === 0 ? (
-              <div className="text-sm text-red-500 py-1">Belum ada kategori / Koneksi WP gagal.</div>
-            ) : (
-              <select 
-                className="input-field mt-1"
-                value={selectedCategoryIds[0] || ''}
-                onChange={(e) => setSelectedCategoryIds([Number(e.target.value)])}
-              >
-                <option value="" disabled>Pilih Kategori...</option>
-                {categories.map(cat => (
-                  <option key={cat.id} value={cat.id}>{cat.name}</option>
-                ))}
-              </select>
-            )}
+          {/* WP SITE + API KEY SELECTORS */}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-gray-700">⚙️ Pilih Integrasi</h3>
+
+            {/* WP Site */}
+            <div>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Situs WordPress</label>
+              {wpSites.length === 0 ? (
+                <div className="text-xs text-gray-400 italic">Belum ada situs terkonfigurasi</div>
+              ) : (
+                <select
+                  className="input-field"
+                  value={selectedWpSiteId}
+                  onChange={e => setSelectedWpSiteId(e.target.value)}
+                >
+                  {wpSites.map(s => (
+                    <option key={s.id} value={s.id}>{s.label}{s.is_active ? ' (Default)' : ''}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* API Key */}
+            <div>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">API Key</label>
+              {apiKeyOptions.length === 0 ? (
+                <div className="text-xs text-gray-400 italic">Belum ada API key terkonfigurasi</div>
+              ) : (
+                <select
+                  className="input-field"
+                  value={selectedApiKeyId}
+                  onChange={e => setSelectedApiKeyId(e.target.value)}
+                >
+                  {apiKeyOptions.map(k => (
+                    <option key={k.id} value={k.id}>[{k.type === 'gemini' ? 'Gemini' : 'OpenRouter'}] {k.label}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* Kategori */}
+            <div>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Kategori WordPress</label>
+              {isFetchingData ? (
+                <div className="flex items-center gap-2 text-xs text-gray-500 py-1">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Memuat kategori...
+                </div>
+              ) : categories.length === 0 ? (
+                <div className="text-xs text-red-500 py-1">Belum ada kategori / Koneksi WP gagal.</div>
+              ) : (
+                <select
+                  className="input-field"
+                  value={selectedCategoryIds[0] || ''}
+                  onChange={(e) => setSelectedCategoryIds([Number(e.target.value)])}
+                >
+                  <option value="" disabled>Pilih Kategori...</option>
+                  {categories.map(cat => (
+                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
           </div>
 
           <div>

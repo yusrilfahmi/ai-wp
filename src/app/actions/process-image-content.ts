@@ -1,7 +1,7 @@
 'use server'
 
 import { getSettings } from '@/app/actions/settings'
-import { getActiveApiKey, getActiveWpSite } from '@/lib/settings-parser'
+import { getActiveApiKey, getActiveWpSite, parseApiKeys, parseWpSites } from '@/lib/settings-parser'
 
 function escapeRegExp(string: string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -19,6 +19,8 @@ export async function processImageContentAction(formData: FormData) {
     const sumberGambar = formData.get('sumberGambarUrl') as string
     const highlights = formData.get('highlights') as string | null
     const imageFile = formData.get('imageData') as File
+    const selectedWpSiteId = formData.get('selectedWpSiteId') as string | null
+    const selectedApiKeyId = formData.get('selectedApiKeyId') as string | null
 
     if (!modeArtikel || !sumberGambar || !imageFile) {
       return { error: 'Mode Artikel, Sumber Gambar, dan Image Data wajib diisi' }
@@ -38,13 +40,13 @@ export async function processImageContentAction(formData: FormData) {
 CRITICAL RULES FOR CONTENT & FORMATTING:
 
 1. MODE-SPECIFIC RULES (You are writing for mode: "${modeArtikel}"):
-   - If "hasil" or "hasil sementara": Do NOT use the word "Akhir" in titles. Use "Hasil [Tim A] vs [Tim B]".
+   - If "hasil" or "hasil sementara": Do NOT use the word "Akhir" in titles. Use "Hasil [Tim A] vs [Tim B] [Skor]".
    - If "rating pemain": Do NOT use the word "Rapor". Use "Penilaian", "Nilai", or "Evaluasi". You MUST include an HTML table (Posisi | Nama Pemain | Nilai).
    - If "top skor" or "klasemen": You MUST include an HTML table representing the standings or top scorers based on the image.
    - If "esports": Do not mention player names individually for hero drafts, just mention the team's overall hero composition.
 
 2. PLAYER NAMES & TERMINOLOGY:
-   - NEVER abbreviate player names (e.g., "Putra B." MUST be expanded to "Beckham Putra" based on your knowledge).
+   - NEVER abbreviate player names (e.g., "Putra B." MUST be expanded to "Beckham Putra").
    - Translate foreign terms to standard Indonesian (e.g., injury time = masa tambahan waktu, leg = pertemuan).
 
 3. HTML ARTICLE STRUCTURE (For "content_raw_html"):
@@ -54,8 +56,18 @@ CRITICAL RULES FOR CONTENT & FORMATTING:
    - Include properly formatted <table> tags if required by the mode.
    - NEVER put internal links or <a> tags inside <h2> or <h3> subheadings.
 
-4. TITLES & KEYWORDS:
-   - Generate EXACTLY 5 reference titles. Titles MUST strictly match the specific context of the requested "Mode Artikel". They must be factual, avoid sensational clickbait, and rigorously follow the SPOK (Subjek, Predikat, Objek, Keterangan) structure in Indonesian. Use proper Title Case (EYD/PUEBI).
+4. TITLES & KEYWORDS (STRICT FEW-SHOT EXAMPLES):
+   - Generate EXACTLY 5 reference titles.
+   - FORMATTING: Titles MUST use a "Two-Part Structure" separated by a colon (:). Part 1 is the Core Fact (Result/Standings/Rating). Part 2 is the Key Highlight in SPOK structure.
+   - NEVER use clickbait, question marks, or exaggerated words.
+   - YOU MUST MIMIC THESE EXACT PATTERNS BASED ON THE MODE:
+     * Mode "hasil": "Hasil Barito Putera vs Persiku Kudus 1-1: Diwarnai Kartu Merah dan Gol Bunuh Diri, Laskar Antasari Harus Rela Berbagi Poin"
+     * Mode "hasil" (with win): "Hasil Manchester City vs Real Madrid 1-2: Puncak Drama VAR dan Gol Telat Vinicius Junior Benamkan Sepuluh Pemain Tuan Rumah"
+     * Mode "hasil sementara": "Hasil Sementara Indonesia vs Saint Kitts and Nevis 2-0: Dwigol Beckham Putra Bawa Skuad Garuda Memimpin di Paruh Pertama"
+     * Mode "klasemen": "Klasemen Lengkap Championship Liga Indonesia Grup A Pekan ke-22: Gilas FC Bekasi City 4-0, Garudayaksa Terus Bayangi Adhyaksa"
+     * Mode "rating pemain": "Penilaian Pemain Chelsea vs Paris Saint-Germain: Matvei Safonov Tampil Sempurna, Lini Belakang Tuan Rumah Terpuruk"
+     * Mode "bagan turnamen": "Bagan Perempat Final Liga Champions: Singkirkan Bayer Leverkusen, Arsenal Tantang Sporting CP"
+     * Mode "esports": "Hasil Bigetron Alpha vs Alter Ego 2-1: Sengit Hingga Gim Ketiga, Skuad Robot Merah Kunci Kemenangan"
    - Extract up to 5 specific core entities (Player Names, Teams, Concepts) for keywords.
 
 5. SOURCE ATTRIBUTION:
@@ -76,86 +88,89 @@ Sumber Gambar: ${sumberGambar}
 ${highlights ? `Yang Harus Dihighlight: ${highlights}\n` : ''}
 Tugas: Analisis gambar statistik/data yang dilampirkan dan buatkan artikel JSON sesuai dengan mode yang dipilih.`
 
-    let generatedJsonString = ''
-
-    if (settings.active_model === 'openrouter') {
-       const orKey = getActiveApiKey(settings.openrouter_api_key)
-       if (!orKey || !settings.openrouter_model_string) {
-          return { error: 'OpenRouter Model String or API Key is missing in settings.' }
-       }
-       const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-         method: 'POST',
-         headers: {
-           'Authorization': `Bearer ${orKey}`,
-           'Content-Type': 'application/json'
-         },
-         body: JSON.stringify({
-           model: settings.openrouter_model_string,
-           messages: [
-             { role: 'system', content: systemPrompt },
-             { 
-               role: 'user', 
-               content: [
-                 { type: "text", text: userPromptText },
-                 { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
-               ] 
-             }
-           ],
-           response_format: { type: 'json_object' }
-         })
-       })
-
-       if (!orRes.ok) {
-         return { error: `OpenRouter error: ${await orRes.text()}` }
-       }
-       const orJson = await orRes.json()
-       generatedJsonString = orJson.choices[0].message.content
-    } else {
-       // Gemini
-       const apiKey = getActiveApiKey(settings.gemini_api_key)
-       if (!apiKey) {
-          return { error: 'Gemini API Key missing in settings.' }
-       }
-       const model = settings.active_model === 'gemini-3.0' ? 'gemini-3.0-flash' : 'gemini-2.5-flash' // using flash as typical fallback
-       
-       const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({
-           system_instruction: { parts: [{ text: systemPrompt }] },
-           contents: [{
-             parts: [
-               { text: userPromptText },
-               { inlineData: { mimeType: mimeType, data: base64Image } }
-             ]
-           }],
-           generationConfig: { responseMimeType: "application/json" }
-         })
-       })
-
-       if (!geminiRes.ok) {
-         return { error: `Gemini API error: ${await geminiRes.text()}` }
-       }
-       
-       const gemJson = await geminiRes.json()
-       // Safeguard for potentially missing parts/text
-       if (!gemJson.candidates || !gemJson.candidates[0].content || !gemJson.candidates[0].content.parts) {
-          console.error("Unexpected Gemini response:", gemJson)
-          return { error: "Gemini sent an unexpected response structure." }
-       }
-       generatedJsonString = gemJson.candidates[0].content.parts[0].text
+    // Resolve which API key to use (override or global active)
+    const resolveApiKey = (dbString: string | undefined, preferredId?: string | null): string | null => {
+      if (!preferredId) return getActiveApiKey(dbString)
+      const keys = parseApiKeys(dbString)
+      return keys.find(k => k.id === preferredId)?.key || getActiveApiKey(dbString)
     }
 
-    const aiOutput = JSON.parse(generatedJsonString)
+    let generatedJsonString = ''
 
-    console.log("=== ALASAN AI MEMILIH KEYWORDS (Multimodal) ===")
-    console.log(aiOutput.tag_reasoning)
-    console.log("KEYWORDS AI (Multimodal):", aiOutput.suggested_keywords)
+    // Helper to call the AI once and return the raw JSON string
+    const callAi = async (): Promise<string> => {
+      if (settings.active_model === 'openrouter') {
+        const orKey = resolveApiKey(settings.openrouter_api_key, selectedApiKeyId)
+        if (!orKey || !settings.openrouter_model_string) throw new Error('OpenRouter Model String or API Key is missing in settings.')
+        const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${orKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: settings.openrouter_model_string,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { 
+                role: 'user', 
+                content: [
+                  { type: 'text', text: userPromptText },
+                  { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } }
+                ] 
+              }
+            ],
+            response_format: { type: 'json_object' }
+          })
+        })
+        if (!orRes.ok) throw new Error(`OpenRouter error: ${await orRes.text()}`)
+        const orJson = await orRes.json()
+        return orJson.choices[0].message.content
+      } else {
+        const apiKey = resolveApiKey(settings.gemini_api_key, selectedApiKeyId)
+        if (!apiKey) throw new Error('Gemini API Key missing in settings.')
+        const model = settings.active_model === 'gemini-3.0' ? 'gemini-3.0-flash' : 'gemini-2.5-flash'
+        const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: systemPrompt }] },
+            contents: [{
+              parts: [
+                { text: userPromptText },
+                { inlineData: { mimeType: mimeType, data: base64Image } }
+              ]
+            }],
+            generationConfig: { responseMimeType: 'application/json' }
+          })
+        })
+        if (!geminiRes.ok) throw new Error(`Gemini API error: ${await geminiRes.text()}`)
+        const gemJson = await geminiRes.json()
+        if (!gemJson.candidates || !gemJson.candidates[0].content || !gemJson.candidates[0].content.parts) {
+          console.error('Unexpected Gemini response:', gemJson)
+          throw new Error('Gemini sent an unexpected response structure.')
+        }
+        return gemJson.candidates[0].content.parts[0].text
+      }
+    }
 
-    // Phase 3: Dynamic WP Tag Search (Validate keywords against WP API)
+    // Attempt AI call with up to 2 keyword retries
+    const MAX_KEYWORD_RETRIES = 2
+    let aiOutput: any = null
+    for (let attempt = 0; attempt <= MAX_KEYWORD_RETRIES; attempt++) {
+      generatedJsonString = await callAi()
+      aiOutput = JSON.parse(generatedJsonString)
+      const hasKeywords = aiOutput.suggested_keywords && Array.isArray(aiOutput.suggested_keywords) && aiOutput.suggested_keywords.length > 0
+      console.log(`[Keyword Attempt ${attempt + 1}] tag_reasoning:`, aiOutput.tag_reasoning)
+      console.log(`[Keyword Attempt ${attempt + 1}] suggested_keywords:`, aiOutput.suggested_keywords)
+      if (hasKeywords) break
+      if (attempt < MAX_KEYWORD_RETRIES) console.warn(`[Keyword Attempt ${attempt + 1}] Keywords undefined/empty — retrying...`)
+    }
+
+    // Phase 3: Dynamic WP Tag Search — use selected or global active WP site
     let verified_tags: Array<{id: number, name: string, link: string, matched_keyword_in_text: string}> = []
     
-    const activeWp = getActiveWpSite(settings.wp_site_url, settings.wp_username, settings.wp_app_password)
+    const allWpSites = parseWpSites(settings.wp_site_url, settings.wp_username, settings.wp_app_password)
+    const activeWp = selectedWpSiteId
+      ? (allWpSites.find(s => s.id === selectedWpSiteId) || getActiveWpSite(settings.wp_site_url, settings.wp_username, settings.wp_app_password))
+      : getActiveWpSite(settings.wp_site_url, settings.wp_username, settings.wp_app_password)
 
     if (aiOutput.suggested_keywords && Array.isArray(aiOutput.suggested_keywords) && activeWp?.url) {
       const authHeader = `Basic ${Buffer.from(`${activeWp.username}:${activeWp.password}`).toString('base64')}`

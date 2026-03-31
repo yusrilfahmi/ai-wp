@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { processImageContentAction } from '@/app/actions/process-image-content'
 import { draftPostAction } from '@/app/actions/draft-post'
-import { getWpCategoriesAction } from '@/app/actions/get-wp-data'
+import { getWpCategoriesAction, getWpSiteOptionsAction, getApiKeyOptionsAction } from '@/app/actions/get-wp-data'
 import { ImageCropper } from '@/components/image-cropper'
 import { toast } from 'sonner'
 import { Loader2, Image as ImageIcon, Send, Sparkles, Trash2, X, FileImage } from 'lucide-react'
@@ -26,6 +26,11 @@ export function ArtikelModeClient() {
   // Left form state
   const [categories, setCategories] = useState<{id: number, name: string}[]>([])
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([])
+  // Site / API key selector
+  const [wpSites, setWpSites] = useState<{id: string, label: string, is_active: boolean}[]>([])
+  const [selectedWpSiteId, setSelectedWpSiteId] = useState<string>('')
+  const [apiKeyOptions, setApiKeyOptions] = useState<{id: string, label: string, type: string}[]>([])
+  const [selectedApiKeyId, setSelectedApiKeyId] = useState<string>('')
   
   const [modeArtikel, setModeArtikel] = useState(MODES[0])
   const [imageData, setImageData] = useState<File | null>(null)
@@ -149,16 +154,49 @@ export function ArtikelModeClient() {
   useEffect(() => {
     async function loadWpData() {
       setIsFetchingData(true)
-      const res = await getWpCategoriesAction()
-      if (res.data) {
-        setCategories(res.data)
+      const [sitesRes, keysRes, catsRes] = await Promise.all([
+        getWpSiteOptionsAction(),
+        getApiKeyOptionsAction(),
+        getWpCategoriesAction()
+      ])
+      if (sitesRes.data) {
+        setWpSites(sitesRes.data)
+        const activeSite = sitesRes.data.find(s => s.is_active) || sitesRes.data[0]
+        if (activeSite) setSelectedWpSiteId(activeSite.id)
+      }
+      if (keysRes.data) {
+        const allKeys = [
+          ...keysRes.data.gemini.map(k => ({ ...k, type: 'gemini' })),
+          ...keysRes.data.openrouter.map(k => ({ ...k, type: 'openrouter' }))
+        ]
+        setApiKeyOptions(allKeys)
+        const activeModel = keysRes.data.active_model
+        const activeKey = activeModel === 'openrouter'
+          ? keysRes.data.openrouter.find(k => k.is_active) || keysRes.data.openrouter[0]
+          : keysRes.data.gemini.find(k => k.is_active) || keysRes.data.gemini[0]
+        if (activeKey) setSelectedApiKeyId(activeKey.id)
+      }
+      if (catsRes.data) {
+        setCategories(catsRes.data)
       } else {
-        toast.error(`WP Connection warning: ${res.error || 'Failed to load categories'}`)
+        toast.error(`WP Connection warning: ${catsRes.error || 'Failed to load categories'}`)
       }
       setIsFetchingData(false)
     }
     loadWpData()
   }, [])
+
+  useEffect(() => {
+    if (!selectedWpSiteId) return
+    async function reloadCategories() {
+      setIsFetchingData(true)
+      setCategories([])
+      const res = await getWpCategoriesAction(selectedWpSiteId)
+      if (res.data) setCategories(res.data)
+      setIsFetchingData(false)
+    }
+    reloadCategories()
+  }, [selectedWpSiteId])
 
   const handleProcess = async () => {
     if (!imageData) {
@@ -173,6 +211,8 @@ export function ArtikelModeClient() {
       formData.append('modeArtikel', modeArtikel)
       formData.append('sumberGambarUrl', sumberGambarUrl)
       if (highlights) formData.append('highlights', highlights)
+      if (selectedWpSiteId) formData.append('selectedWpSiteId', selectedWpSiteId)
+      if (selectedApiKeyId) formData.append('selectedApiKeyId', selectedApiKeyId)
 
       const res = await processImageContentAction(formData)
 
@@ -476,26 +516,65 @@ export function ArtikelModeClient() {
              )}
           </div>
 
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-            <h3 className="text-sm font-medium text-gray-700 mb-2">Pilih Kategori</h3>
-            {isFetchingData ? (
-              <div className="flex items-center gap-2 text-sm text-gray-500 py-1">
-                <Loader2 className="w-4 h-4 animate-spin" /> Fetching...
-              </div>
-            ) : categories.length === 0 ? (
-              <div className="text-sm text-red-500 py-1">Belum ada kategori / Koneksi WP gagal.</div>
-            ) : (
-              <select 
-                className="input-field mt-1"
-                value={selectedCategoryIds[0] || ''}
-                onChange={(e) => setSelectedCategoryIds([Number(e.target.value)])}
-              >
-                <option value="" disabled>Pilih Kategori...</option>
-                {categories.map(cat => (
-                  <option key={cat.id} value={cat.id}>{cat.name}</option>
-                ))}
-              </select>
-            )}
+          {/* WP SITE + API KEY SELECTORS */}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-gray-700">⚙️ Pilih Integrasi</h3>
+
+            <div>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Situs WordPress</label>
+              {wpSites.length === 0 ? (
+                <div className="text-xs text-gray-400 italic">Belum ada situs terkonfigurasi</div>
+              ) : (
+                <select
+                  className="input-field"
+                  value={selectedWpSiteId}
+                  onChange={e => setSelectedWpSiteId(e.target.value)}
+                >
+                  {wpSites.map(s => (
+                    <option key={s.id} value={s.id}>{s.label}{s.is_active ? ' (Default)' : ''}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">API Key</label>
+              {apiKeyOptions.length === 0 ? (
+                <div className="text-xs text-gray-400 italic">Belum ada API key terkonfigurasi</div>
+              ) : (
+                <select
+                  className="input-field"
+                  value={selectedApiKeyId}
+                  onChange={e => setSelectedApiKeyId(e.target.value)}
+                >
+                  {apiKeyOptions.map(k => (
+                    <option key={k.id} value={k.id}>[{k.type === 'gemini' ? 'Gemini' : 'OpenRouter'}] {k.label}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Kategori WordPress</label>
+              {isFetchingData ? (
+                <div className="flex items-center gap-2 text-xs text-gray-500 py-1">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Memuat kategori...
+                </div>
+              ) : categories.length === 0 ? (
+                <div className="text-xs text-red-500 py-1">Belum ada kategori / Koneksi WP gagal.</div>
+              ) : (
+                <select
+                  className="input-field"
+                  value={selectedCategoryIds[0] || ''}
+                  onChange={(e) => setSelectedCategoryIds([Number(e.target.value)])}
+                >
+                  <option value="" disabled>Pilih Kategori...</option>
+                  {categories.map(cat => (
+                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
           </div>
 
           <div>
