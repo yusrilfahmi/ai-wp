@@ -39,24 +39,27 @@ export async function processImageContentAction(formData: FormData) {
     const systemPrompt = `${basePersona}${injectedCustomPrompt}
 CRITICAL RULES FOR CONTENT & FORMATTING:
 
-1. MODE-SPECIFIC RULES (You are writing for mode: "${modeArtikel}"):
+1. KEYWORDS (TAG EXTRACTION): Extract up to 5 highly specific, core entities directly present in the image data (e.g., exact Player Names, exact Team Names, Tournament Names, Competition Names). Output purely as an array of strings. Do NOT infer distant relationships or add generic sports terms. Only include what is explicitly visible or referenced.
+   - Provide a step-by-step "tag_reasoning" justification for EACH keyword you chose, citing evidence from the image data.
+
+2. MODE-SPECIFIC RULES (You are writing for mode: "${modeArtikel}"):
    - If "hasil" or "hasil sementara": Do NOT use the word "Akhir" in titles. Use "Hasil [Tim A] vs [Tim B] [Skor]".
    - If "rating pemain": Do NOT use the word "Rapor". Use "Penilaian", "Nilai", or "Evaluasi". You MUST include an HTML table (Posisi | Nama Pemain | Nilai).
    - If "top skor" or "klasemen": You MUST include an HTML table representing the standings or top scorers based on the image.
    - If "esports": Do not mention player names individually for hero drafts, just mention the team's overall hero composition.
 
-2. PLAYER NAMES & TERMINOLOGY:
+3. PLAYER NAMES & TERMINOLOGY:
    - NEVER abbreviate player names (e.g., "Putra B." MUST be expanded to "Beckham Putra").
    - Translate foreign terms to standard Indonesian (e.g., injury time = masa tambahan waktu, leg = pertemuan).
 
-3. HTML ARTICLE STRUCTURE (For "content_raw_html"):
+4. HTML ARTICLE STRUCTURE (For "content_raw_html"):
    - The opening section before the first subheading MUST have at least 3 distinct paragraphs (<p>).
    - Include at least 2 subheadings using <h2> tags.
    - Under EACH <h2> subheading, write at least 3 distinct paragraphs (<p>).
    - Include properly formatted <table> tags if required by the mode.
    - NEVER put internal links or <a> tags inside <h2> or <h3> subheadings.
 
-4. TITLES & KEYWORDS (STRICT FEW-SHOT EXAMPLES):
+5. TITLES (STRICT FEW-SHOT EXAMPLES):
    - Generate EXACTLY 5 reference titles.
    - FORMATTING: Titles MUST use a "Two-Part Structure" separated by a colon (:). Part 1 is the Core Fact (Result/Standings/Rating). Part 2 is the Key Highlight in SPOK structure.
    - NEVER use clickbait, question marks, or exaggerated words.
@@ -68,10 +71,6 @@ CRITICAL RULES FOR CONTENT & FORMATTING:
      * Mode "rating pemain": "Penilaian Pemain Chelsea vs Paris Saint-Germain: Matvei Safonov Tampil Sempurna, Lini Belakang Tuan Rumah Terpuruk"
      * Mode "bagan turnamen": "Bagan Perempat Final Liga Champions: Singkirkan Bayer Leverkusen, Arsenal Tantang Sporting CP"
      * Mode "esports": "Hasil Bigetron Alpha vs Alter Ego 2-1: Sengit Hingga Gim Ketiga, Skuad Robot Merah Kunci Kemenangan"
-   - Extract up to 5 specific core entities (Player Names, Teams, Concepts) for keywords.
-
-5. SOURCE ATTRIBUTION:
-   - If relevant, naturally acknowledge the match data based on the provided image source: "${sumberGambar}". Do not use vague phrases like "dari berbagai sumber".
 
 Output MUST be strictly in JSON format (DO NOT wrap in markdown \`\`\`json blocks):
 {
@@ -179,6 +178,7 @@ Tugas: Analisis gambar statistik/data yang dilampirkan dan buatkan artikel JSON 
         try {
           const encodedKeyword = encodeURIComponent(keyword)
           const searchUrl = new URL(`/wp-json/wp/v2/tags?search=${encodedKeyword}`, activeWp.url)
+          console.log(`[ArtikelMode] Searching WP for tag: ${keyword} -> ${searchUrl}`)
           
           const res = await fetch(searchUrl.toString(), {
             headers: { Authorization: authHeader }
@@ -206,6 +206,8 @@ Tugas: Analisis gambar statistik/data yang dilampirkan dan buatkan artikel JSON 
 
       const results = await Promise.all(searchPromises)
       verified_tags = results.filter((t): t is NonNullable<typeof t> => t !== null)
+      
+      console.log('[ArtikelMode] VERIFIED ACTUAL TAGS DARI WP:', verified_tags)
     }
 
     // Phase 4: The Internal Link Injector (Regex Logic)

@@ -5,6 +5,7 @@ import { processImageContentAction } from '@/app/actions/process-image-content'
 import { draftPostAction } from '@/app/actions/draft-post'
 import { getWpCategoriesAction, getWpSiteOptionsAction, getApiKeyOptionsAction } from '@/app/actions/get-wp-data'
 import { ImageCropper } from '@/components/image-cropper'
+import { ArticleHtmlEditor } from '@/components/rich-text-editor'
 import { toast } from 'sonner'
 import { Loader2, Image as ImageIcon, Send, Sparkles, Trash2, X, FileImage } from 'lucide-react'
 
@@ -31,6 +32,7 @@ export function ArtikelModeClient() {
   const [selectedWpSiteId, setSelectedWpSiteId] = useState<string>('')
   const [apiKeyOptions, setApiKeyOptions] = useState<{id: string, label: string, type: string}[]>([])
   const [selectedApiKeyId, setSelectedApiKeyId] = useState<string>('')
+  const [activeModel, setActiveModel] = useState<string>('')
   
   const [modeArtikel, setModeArtikel] = useState(MODES[0])
   const [imageData, setImageData] = useState<File | null>(null)
@@ -171,6 +173,8 @@ export function ArtikelModeClient() {
         ]
         setApiKeyOptions(allKeys)
         const activeModel = keysRes.data.active_model
+        setActiveModel(activeModel)
+        // Pre-select active key matching the active model type
         const activeKey = activeModel === 'openrouter'
           ? keysRes.data.openrouter.find(k => k.is_active) || keysRes.data.openrouter[0]
           : keysRes.data.gemini.find(k => k.is_active) || keysRes.data.gemini[0]
@@ -252,6 +256,7 @@ export function ArtikelModeClient() {
     formData.append('excerpt', metaDesc)
     formData.append('tags', JSON.stringify(selectedTags.map(t => t.id)))
     formData.append('categories', JSON.stringify(selectedCategoryIds))
+    formData.append('selectedWpSiteId', selectedWpSiteId)
     
     // Set Image Metadata from Title & Sumber Gambar
     formData.append('image_alt', selectedTitle)
@@ -509,9 +514,10 @@ export function ArtikelModeClient() {
                   placeholder="<p>Konten artikel...</p>"
                 />
              ) : (
-                <div 
-                  className="rounded-lg border border-gray-300 p-5 min-h-[400px] max-h-[600px] overflow-y-auto bg-white text-sm leading-relaxed [&>p]:mb-4 [&>h2]:text-xl [&>h2]:font-bold [&>h2]:mt-6 [&>h2]:mb-3 [&>h2]:text-gray-900 [&>h3]:text-lg [&>h3]:font-semibold [&>h3]:mt-5 [&>h3]:mb-2 [&>h3]:text-gray-800 [&>blockquote]:border-l-4 [&>blockquote]:border-indigo-500 [&>blockquote]:bg-indigo-50 [&>blockquote]:pl-4 [&>blockquote]:pr-4 [&>blockquote]:py-2 [&>blockquote]:rounded-r-md [&>blockquote]:text-gray-700 [&>blockquote]:italic [&>blockquote]:my-5 [&>a]:text-red-600 [&>a]:font-medium [&>a]:underline hover:[&>a]:text-red-800 [&>table]:w-full [&>table]:border-collapse [&>table]:my-5 border [&>table]:border-gray-200 [&_th]:bg-gray-100 [&_th]:border [&_th]:border-gray-300 [&_th]:p-2 [&_th]:text-left [&_td]:border [&_td]:border-gray-300 [&_td]:p-2"
-                  dangerouslySetInnerHTML={{ __html: rawHtml || '<p class="text-gray-400 italic text-center mt-10">Pratinjau artikel akan muncul di sini setelah diproses...</p>' }}
+                <ArticleHtmlEditor
+                  value={rawHtml}
+                  onChange={setRawHtml}
+                  minHeight="400px"
                 />
              )}
           </div>
@@ -539,19 +545,22 @@ export function ArtikelModeClient() {
 
             <div>
               <label className="text-xs font-medium text-gray-600 mb-1 block">API Key</label>
-              {apiKeyOptions.length === 0 ? (
-                <div className="text-xs text-gray-400 italic">Belum ada API key terkonfigurasi</div>
-              ) : (
-                <select
-                  className="input-field"
-                  value={selectedApiKeyId}
-                  onChange={e => setSelectedApiKeyId(e.target.value)}
-                >
-                  {apiKeyOptions.map(k => (
-                    <option key={k.id} value={k.id}>[{k.type === 'gemini' ? 'Gemini' : 'OpenRouter'}] {k.label}</option>
-                  ))}
-                </select>
-              )}
+              {(() => {
+                const filteredKeys = apiKeyOptions.filter(k => k.type === activeModel || (activeModel !== 'openrouter' && k.type === 'gemini'))
+                return filteredKeys.length === 0 ? (
+                  <div className="text-xs text-gray-400 italic">Belum ada API key terkonfigurasi</div>
+                ) : (
+                  <select
+                    className="input-field"
+                    value={selectedApiKeyId}
+                    onChange={e => setSelectedApiKeyId(e.target.value)}
+                  >
+                    {filteredKeys.map(k => (
+                      <option key={k.id} value={k.id}>[{k.type === 'gemini' ? 'Gemini' : 'OpenRouter'}] {k.label}</option>
+                    ))}
+                  </select>
+                )
+              })()}
             </div>
 
             <div>

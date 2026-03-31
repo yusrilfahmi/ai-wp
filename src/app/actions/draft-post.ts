@@ -2,14 +2,20 @@
 
 import { getSettings } from '@/app/actions/settings'
 
-import { getActiveWpSite } from '@/lib/settings-parser'
+import { getActiveWpSite, parseWpSites } from '@/lib/settings-parser'
 
 export async function draftPostAction(formData: FormData) {
   try {
     const settings = await getSettings()
     if (!settings) return { error: 'Settings not configured' }
 
-    const activeWp = getActiveWpSite(settings.wp_site_url, settings.wp_username, settings.wp_app_password)
+    const selectedWpSiteId = formData.get('selectedWpSiteId') as string | null
+
+    const allSites = parseWpSites(settings.wp_site_url, settings.wp_username, settings.wp_app_password)
+    const activeWp = selectedWpSiteId
+      ? (allSites.find(s => s.id === selectedWpSiteId) ?? getActiveWpSite(settings.wp_site_url, settings.wp_username, settings.wp_app_password))
+      : getActiveWpSite(settings.wp_site_url, settings.wp_username, settings.wp_app_password)
+
     if (!activeWp || !activeWp.url || !activeWp.username || !activeWp.password) {
       return { error: 'WordPress settings are not fully configured' }
     }

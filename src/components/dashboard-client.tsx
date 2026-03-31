@@ -5,6 +5,7 @@ import { processContentAction, scrapeUrlAction, translateFreeAction } from '@/ap
 import { draftPostAction } from '@/app/actions/draft-post'
 import { getWpCategoriesAction, getWpSiteOptionsAction, getApiKeyOptionsAction } from '@/app/actions/get-wp-data'
 import { ImageCropper } from '@/components/image-cropper'
+import { SourceTextEditor, ArticleHtmlEditor } from '@/components/rich-text-editor'
 import { toast } from 'sonner'
 import { Loader2, Image as ImageIcon, Send, Sparkles, Trash2, X, Download, Languages } from 'lucide-react'
 
@@ -23,6 +24,7 @@ export function DashboardClient() {
   const [selectedWpSiteId, setSelectedWpSiteId] = useState<string>('')
   const [apiKeyOptions, setApiKeyOptions] = useState<{id: string, label: string, type: string}[]>([])
   const [selectedApiKeyId, setSelectedApiKeyId] = useState<string>('')
+  const [activeModel, setActiveModel] = useState<string>('')
   const [fixJudul, setFixJudul] = useState('')
   const [linkSumber, setLinkSumber] = useState('')
   const [sumberLain, setSumberLain] = useState('')
@@ -142,8 +144,9 @@ export function DashboardClient() {
           ...keysRes.data.openrouter.map(k => ({ ...k, type: 'openrouter' }))
         ]
         setApiKeyOptions(allKeys)
-        // Pick active key for the active model
         const activeModel = keysRes.data.active_model
+        setActiveModel(activeModel)
+        // Pre-select active key matching the active model type
         const activeKey = activeModel === 'openrouter'
           ? keysRes.data.openrouter.find(k => k.is_active) || keysRes.data.openrouter[0]
           : keysRes.data.gemini.find(k => k.is_active) || keysRes.data.gemini[0]
@@ -278,8 +281,7 @@ export function DashboardClient() {
     formData.append('excerpt', metaDesc)
     formData.append('tags', JSON.stringify(selectedTags.map(t => t.id)))
     formData.append('categories', JSON.stringify(selectedCategoryIds))
-    
-    formData.append('categories', JSON.stringify(selectedCategoryIds))
+    formData.append('selectedWpSiteId', selectedWpSiteId)
     
     // Set Image Metadata from Title & Sumber Gambar
     formData.append('image_alt', selectedTitle)
@@ -414,15 +416,14 @@ export function DashboardClient() {
                 </span>
               )}
             </p>
-            <textarea
+            <SourceTextEditor
               value={viewMode === 'translated' && translatedText !== null ? translatedText : originalText}
-              onChange={e =>
+              onChange={(val) =>
                 viewMode === 'translated'
-                  ? setTranslatedText(e.target.value)
-                  : setOriginalText(e.target.value)
+                  ? setTranslatedText(val)
+                  : setOriginalText(val)
               }
-              className="w-full min-h-[500px] p-8 text-gray-800 text-lg md:text-xl leading-relaxed md:leading-loose font-serif bg-gray-50 border border-gray-300 rounded-xl shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y whitespace-pre-wrap"
-              placeholder="Klik 'Tarik Teks dari URL' untuk mengisi otomatis, atau ketik/paste teks sumber secara manual di sini..."
+              minHeight="500px"
             />
           </div>
 
@@ -584,9 +585,10 @@ export function DashboardClient() {
                   placeholder="<p>Konten artikel...</p>"
                 />
              ) : (
-                <div 
-                  className="rounded-lg border border-gray-300 p-5 min-h-[400px] max-h-[600px] overflow-y-auto bg-white text-sm leading-relaxed [&>p]:mb-4 [&>h2]:text-xl [&>h2]:font-bold [&>h2]:mt-6 [&>h2]:mb-3 [&>h2]:text-gray-900 [&>h3]:text-lg [&>h3]:font-semibold [&>h3]:mt-5 [&>h3]:mb-2 [&>h3]:text-gray-800 [&>blockquote]:border-l-4 [&>blockquote]:border-indigo-500 [&>blockquote]:bg-indigo-50 [&>blockquote]:pl-4 [&>blockquote]:pr-4 [&>blockquote]:py-2 [&>blockquote]:rounded-r-md [&>blockquote]:text-gray-700 [&>blockquote]:italic [&>blockquote]:my-5 [&>a]:text-red-600 [&>a]:font-medium [&>a]:underline hover:[&>a]:text-red-800"
-                  dangerouslySetInnerHTML={{ __html: rawHtml || '<p class="text-gray-400 italic text-center mt-10">Pratinjau artikel akan muncul di sini setelah diproses...</p>' }}
+                <ArticleHtmlEditor
+                  value={rawHtml}
+                  onChange={setRawHtml}
+                  minHeight="400px"
                 />
              )}
           </div>
@@ -616,19 +618,22 @@ export function DashboardClient() {
             {/* API Key */}
             <div>
               <label className="text-xs font-medium text-gray-600 mb-1 block">API Key</label>
-              {apiKeyOptions.length === 0 ? (
-                <div className="text-xs text-gray-400 italic">Belum ada API key terkonfigurasi</div>
-              ) : (
-                <select
-                  className="input-field"
-                  value={selectedApiKeyId}
-                  onChange={e => setSelectedApiKeyId(e.target.value)}
-                >
-                  {apiKeyOptions.map(k => (
-                    <option key={k.id} value={k.id}>[{k.type === 'gemini' ? 'Gemini' : 'OpenRouter'}] {k.label}</option>
-                  ))}
-                </select>
-              )}
+              {(() => {
+                const filteredKeys = apiKeyOptions.filter(k => k.type === activeModel || (activeModel !== 'openrouter' && k.type === 'gemini'))
+                return filteredKeys.length === 0 ? (
+                  <div className="text-xs text-gray-400 italic">Belum ada API key terkonfigurasi</div>
+                ) : (
+                  <select
+                    className="input-field"
+                    value={selectedApiKeyId}
+                    onChange={e => setSelectedApiKeyId(e.target.value)}
+                  >
+                    {filteredKeys.map(k => (
+                      <option key={k.id} value={k.id}>[{k.type === 'gemini' ? 'Gemini' : 'OpenRouter'}] {k.label}</option>
+                    ))}
+                  </select>
+                )
+              })()}
             </div>
 
             {/* Kategori */}
