@@ -58,9 +58,16 @@ async function scrapeWebText(url: string): Promise<string> {
   try {
     const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0)'
-      },
-      signal: AbortSignal.timeout(10000)
+    // Menyamar sebagai Google Chrome versi terbaru di Windows
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    // Meniru header standar manusia
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"'
+  },
+    signal: AbortSignal.timeout(10000)
     })
     if (!res.ok) return `[Failed to fetch source: HTTP ${res.status}]`
 
