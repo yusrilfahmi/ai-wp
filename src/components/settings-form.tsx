@@ -76,7 +76,11 @@ export function SettingsForm({ initialData }: { initialData?: UserSettings | nul
                 className="input-field appearance-none bg-white border-gray-300 pr-10"
               >
                 <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
+                <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite Preview</option>
+                <option value="gemini-3-flash-preview">Gemini 3 Flash Preview</option>
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                <option value="gemini-2.5-flash-lite-preview-09-2025">Gemini 2.5 Flash-Lite Preview</option>
+                <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
                 <option value="openrouter">OpenRouter</option>
               </select>
               <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
