@@ -202,7 +202,8 @@ ${data.rawScrapedText || '[No source content provided — write based on the tit
       } else {
         const apiKey = resolveApiKey(settings.gemini_api_key, data.selectedApiKeyId)
         if (!apiKey) throw new Error('Gemini API Key missing in settings.')
-        const model = settings.active_model === 'gemini-3.0' ? 'gemini-3.0-flash' : 'gemini-2.5-flash'
+        // const model = settings.active_model === 'gemini-3.0' ? 'gemini-3.0-flash' : 'gemini-2.5-flash'
+        const model = settings.active_model
         const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
