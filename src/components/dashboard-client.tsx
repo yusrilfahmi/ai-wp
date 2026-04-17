@@ -25,6 +25,7 @@ export function DashboardClient() {
   const [apiKeyOptions, setApiKeyOptions] = useState<{id: string, label: string, type: string}[]>([])
   const [selectedApiKeyId, setSelectedApiKeyId] = useState<string>('')
   const [activeModel, setActiveModel] = useState<string>('')
+  const [selectedModelOverride, setSelectedModelOverride] = useState<string>('')
   const [fixJudul, setFixJudul] = useState('')
   const [linkSumber, setLinkSumber] = useState('')
   const [sumberLain, setSumberLain] = useState('')
@@ -242,7 +243,8 @@ export function DashboardClient() {
         highlights,
         rawScrapedText: viewMode === 'translated' && translatedText ? translatedText : originalText,
         selectedWpSiteId: selectedWpSiteId || undefined,
-        selectedApiKeyId: selectedApiKeyId || undefined
+        selectedApiKeyId: selectedApiKeyId || undefined,
+        selectedModelOverride: selectedModelOverride || undefined
       })
 
       if (res.error || !res.data) {
@@ -524,20 +526,30 @@ export function DashboardClient() {
           <div>
             <label className="text-sm font-medium text-gray-700 mb-2 block">Reference Judul</label>
             {generatedTitles.length > 0 ? (
-              <div className="space-y-2 bg-gray-50 p-2 rounded-lg border border-gray-200">
-                {generatedTitles.map((title, idx) => (
-                  <label key={idx} className="flex items-center gap-3 p-2 rounded hover:bg-gray-100 cursor-pointer transition-colors bg-white border border-gray-200">
-                    <input 
-                      type="radio" 
-                      name="selectedTitle" 
-                      value={title} 
-                      checked={selectedTitle === title}
-                      onChange={() => setSelectedTitle(title)}
-                      className="accent-emerald-500 w-4 h-4 mt-0.5"
-                    />
-                    <span className="text-sm font-medium leading-tight">{title}</span>
-                  </label>
-                ))}
+              <div className="space-y-4">
+                <div className="space-y-2 bg-gray-50 p-2 rounded-lg border border-gray-200 h-40 overflow-y-auto">
+                  {generatedTitles.map((title, idx) => (
+                    <label key={idx} className="flex items-start gap-3 p-2 rounded hover:bg-gray-100 cursor-pointer transition-colors bg-white border border-gray-200">
+                      <input 
+                        type="radio" 
+                        name="selectedTitle" 
+                        value={title} 
+                        checked={selectedTitle === title}
+                        onChange={() => setSelectedTitle(title)}
+                        className="accent-emerald-500 w-4 h-4 mt-1 flex-shrink-0"
+                      />
+                      <span className="text-sm font-medium leading-tight">{title}</span>
+                    </label>
+                  ))}
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-emerald-700 mb-1 block flex items-center gap-1">Judul Final (Bisa Diedit):</label>
+                   <input 
+                     value={selectedTitle} onChange={e => setSelectedTitle(e.target.value)} 
+                     className="input-field border-emerald-300 focus:ring-emerald-500 bg-emerald-50/30 font-medium text-emerald-900" 
+                     placeholder="Pilih dari atas atau ketik judul Anda sendiri..."
+                   />
+                </div>
               </div>
             ) : (
               <div className="text-sm text-gray-500 italic p-4 bg-gray-100/50 rounded-lg text-center border border-dashed border-gray-200">
@@ -615,11 +627,37 @@ export function DashboardClient() {
               )}
             </div>
 
+            {/* Pilih Model AI */}
+            <div>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Pilih Model AI</label>
+              <select
+                 className="input-field"
+                 value={selectedModelOverride}
+                 onChange={e => {
+                   const newVal = e.target.value;
+                   setSelectedModelOverride(newVal);
+                   const isOr = newVal === 'openrouter' || (!newVal && activeModel === 'openrouter');
+                   const reqType = isOr ? 'openrouter' : 'gemini';
+                   const firstKey = apiKeyOptions.find(k => k.type === reqType);
+                   if (firstKey) setSelectedApiKeyId(firstKey.id);
+                 }}
+              >
+                 <option value="">Gunakan Default dari Settings</option>
+                 <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite Preview</option>
+                 <option value="gemini-3-flash-preview">Gemini 3 Flash Preview</option>
+                 <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                 <option value="openrouter">OpenRouter (Sesuai Settings)</option>
+              </select>
+            </div>
+
             {/* API Key */}
             <div>
               <label className="text-xs font-medium text-gray-600 mb-1 block">API Key</label>
               {(() => {
-                const filteredKeys = apiKeyOptions.filter(k => k.type === activeModel || (activeModel !== 'openrouter' && k.type === 'gemini'))
+                const reqType = selectedModelOverride 
+                                  ? (selectedModelOverride === 'openrouter' ? 'openrouter' : 'gemini') 
+                                  : (activeModel === 'openrouter' ? 'openrouter' : 'gemini')
+                const filteredKeys = apiKeyOptions.filter(k => k.type === reqType)
                 return filteredKeys.length === 0 ? (
                   <div className="text-xs text-gray-400 italic">Belum ada API key terkonfigurasi</div>
                 ) : (

@@ -2,6 +2,8 @@
 
 import { getSettings } from '@/app/actions/settings'
 import { getActiveApiKey, getActiveWpSite, parseApiKeys, parseWpSites } from '@/lib/settings-parser'
+import fs from 'fs'
+import path from 'path'
 
 function escapeRegExp(string: string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -19,8 +21,12 @@ export async function processImageContentAction(formData: FormData) {
     const sumberGambar = formData.get('sumberGambarUrl') as string
     const highlights = formData.get('highlights') as string | null
     const imageFile = formData.get('imageData') as File
+    const extraImageFile = formData.get('extraImageData') as File | null
+    const headToHeadImageFile = formData.get('headToHeadImageData') as File | null
+    const penjelasanGambar = formData.get('penjelasanGambar') as string | null
     const selectedWpSiteId = formData.get('selectedWpSiteId') as string | null
     const selectedApiKeyId = formData.get('selectedApiKeyId') as string | null
+    const selectedModelOverride = formData.get('selectedModelOverride') as string | null
 
     if (!modeArtikel || !sumberGambar || !imageFile) {
       return { error: 'Mode Artikel, Sumber Gambar, dan Image Data wajib diisi' }
@@ -31,6 +37,35 @@ export async function processImageContentAction(formData: FormData) {
     const buffer = Buffer.from(arrayBuffer)
     const base64Image = buffer.toString('base64')
     const mimeType = imageFile.type
+
+    let base64ExtraImage: string | null = null
+    let extraMimeType = ''
+    if (extraImageFile) {
+      const exArrayBuffer = await extraImageFile.arrayBuffer()
+      base64ExtraImage = Buffer.from(exArrayBuffer).toString('base64')
+      extraMimeType = extraImageFile.type
+    }
+
+    let base64H2HImage: string | null = null
+    let h2hMimeType = ''
+    if (headToHeadImageFile) {
+      const h2hArrayBuffer = await headToHeadImageFile.arrayBuffer()
+      base64H2HImage = Buffer.from(h2hArrayBuffer).toString('base64')
+      h2hMimeType = headToHeadImageFile.type
+    }
+
+    let base64HeroList: string | null = null
+    const isEsportsMode = modeArtikel === 'Hasil Laga Esports (Mobile Legends)'
+    if (isEsportsMode) {
+      try {
+        const heroListPath = path.join(process.cwd(), 'src/app/actions/hero_list_mlbb.png')
+        if (fs.existsSync(heroListPath)) {
+            base64HeroList = fs.readFileSync(heroListPath).toString('base64')
+        }
+      } catch (err) {
+        console.error('Failed to load hero_list_mlbb.png', err)
+      }
+    }
 
     // Phase 2: Multimodal AI Content Generation (Image to JSON)
     const basePersona = `You are an expert sports journalist writing hard news articles in formal Indonesian (Bahasa Indonesia baku).`
@@ -61,6 +96,8 @@ CRITICAL RULES FOR CONTENT & FORMATTING:
 
 5. TITLES (STRICT FEW-SHOT EXAMPLES):
    - Generate EXACTLY 5 reference titles.
+   - PUEBI/EYD TITLE CASE: Semua kata hubung dan kata depan (dan, di, ke, dari, yang, untuk, pada, dalam, dengan) WAJIB ditulis dengan huruf kecil di judul!
+   - GAYA BAHASA JURNALISTIK: Gunakan diksi berita gaya olahraga yang luwes dan "punchy". Hindari kata awalan formal yang kaku. Gunakan pemendekan kata dasar (contoh: "mengincar" -> "incar", "tidak akan" -> "tak akan", "membawa" -> "bawa").
    - FORMATTING: Titles MUST use a "Two-Part Structure" separated by a colon (:). Part 1 is the Core Fact (Result/Standings/Rating). Part 2 is the Key Highlight in SPOK structure.
    - NEVER use clickbait, question marks, or exaggerated words.
    - YOU MUST MIMIC THESE EXACT PATTERNS BASED ON THE MODE:
@@ -70,7 +107,8 @@ CRITICAL RULES FOR CONTENT & FORMATTING:
      * Mode "klasemen": "Klasemen Lengkap Championship Liga Indonesia Grup A Pekan ke-22: Gilas FC Bekasi City 4-0, Garudayaksa Terus Bayangi Adhyaksa"
      * Mode "rating pemain": "Penilaian Pemain Chelsea vs Paris Saint-Germain: Matvei Safonov Tampil Sempurna, Lini Belakang Tuan Rumah Terpuruk"
      * Mode "bagan turnamen": "Bagan Perempat Final Liga Champions: Singkirkan Bayer Leverkusen, Arsenal Tantang Sporting CP"
-     * Mode "esports": "Hasil Bigetron Alpha vs Alter Ego 2-1: Sengit Hingga Gim Ketiga, Skuad Robot Merah Kunci Kemenangan"
+     * Mode "jadwal": "Jadwal Pertandingan Liga Inggris: Arsenal Menantang Manchester City di Emirates Stadium. (PENTING: Di mode ini Anda membuat artikel preview/jadwal laga. Gambar pertama = Jadwal Utama, Gambar kedua = Klasemen, Gambar ketiga = Statistik Head to Head. Rangkum info penting dari ketiganya secara urut.)"
+     * Mode "esports": "Hasil Bigetron Alpha vs Alter Ego 2-1: Sengit Hingga Gim Ketiga, Skuad Robot Merah Kunci Kemenangan. (ATURAN MUTLAK HERO DRAFT: JANGAN MENGARANG BEBAS NAMA HERO! AI harus melihat 1 per 1 wajah kecil hero yang ada di screenshot laga, lalu MENCOCOKKAN SECARA VISUAL SATU PER SATU wajah/ikon tersebut ke dalam daftar wajah yang ada di gambar referensi 'hero_list_mlbb'. Hanya tulis nama hero yang fotonya 100% identik di gambar referensi. Jika tidak yakin, tulis 'beberapa hero andalan'. JANGAN menyebut hero yang wajahnya tidak ada! Jika ada gambar klasemen tambahan, bahas klasemen tersebut.)"
 
 Output MUST be strictly in JSON format (DO NOT wrap in markdown \`\`\`json blocks):
 {
@@ -84,8 +122,7 @@ Output MUST be strictly in JSON format (DO NOT wrap in markdown \`\`\`json block
     const userPromptText = `Input Data:
 Mode Artikel: ${modeArtikel}
 Sumber Gambar: ${sumberGambar}
-${highlights ? `Yang Harus Dihighlight: ${highlights}\n` : ''}
-Tugas: Analisis gambar statistik/data yang dilampirkan dan buatkan artikel JSON sesuai dengan mode yang dipilih.`
+${penjelasanGambar ? `Penjelasan Gambar: ${penjelasanGambar}\n` : ''}${highlights ? `\n===================================\nINSTRUKSI MUTLAK (HIGHLIGHT UTAMA):\nAnda WAJIB dan HARUS memastikan seluruh isi artikel sejalan, merepresentasikan, dan memasukkan poin-poin berikut ini. Highlight ini adalah panduan UTAMA arah artikel, LEBIH PENTING dari pada opini data lainnya:\n[ ${highlights} ]\n===================================\n` : ''}Tugas: Analisis gambar statistik/data yang dilampirkan dan buatkan artikel JSON sesuai dengan mode yang dipilih.`
 
     // Resolve which API key to use (override or global active)
     const resolveApiKey = (dbString: string | undefined, preferredId?: string | null): string | null => {
@@ -96,9 +133,12 @@ Tugas: Analisis gambar statistik/data yang dilampirkan dan buatkan artikel JSON 
 
     let generatedJsonString = ''
 
+    const baseModel = selectedModelOverride || settings.active_model || 'gemini-2.5-flash'
+    const useOpenRouter = baseModel === 'openrouter'
+
     // Helper to call the AI once and return the raw JSON string
     const callAi = async (): Promise<string> => {
-      if (settings.active_model === 'openrouter') {
+      if (useOpenRouter) {
         const orKey = resolveApiKey(settings.openrouter_api_key, selectedApiKeyId)
         if (!orKey || !settings.openrouter_model_string) throw new Error('OpenRouter Model String or API Key is missing in settings.')
         const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -110,10 +150,25 @@ Tugas: Analisis gambar statistik/data yang dilampirkan dan buatkan artikel JSON 
               { role: 'system', content: systemPrompt },
               { 
                 role: 'user', 
-                content: [
-                  { type: 'text', text: userPromptText },
-                  { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } }
-                ] 
+                content: (() => {
+                  const arr: any[] = [
+                    { type: 'text', text: userPromptText },
+                    { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } }
+                  ]
+                  if (base64ExtraImage) {
+                     arr.push({ type: 'text', text: "\nGAMBAR KEDUA (KLASEMEN/TAMBAHAN):\n" })
+                     arr.push({ type: 'image_url', image_url: { url: `data:${extraMimeType};base64,${base64ExtraImage}` } })
+                  }
+                  if (base64H2HImage) {
+                     arr.push({ type: 'text', text: "\nGAMBAR KETIGA (STATISTIK HEAD TO HEAD):\n" })
+                     arr.push({ type: 'image_url', image_url: { url: `data:${h2hMimeType};base64,${base64H2HImage}` } })
+                  }
+                  if (base64HeroList) {
+                     arr.push({ type: 'text', text: "\nREFERENSI WAJAH & NAMA HERO MOBILE LEGENDS (GUNAKAN INI UNTUK MENEBAK HERO DI SCREENSHOT):\n" })
+                     arr.push({ type: 'image_url', image_url: { url: `data:image/png;base64,${base64HeroList}` } })
+                  }
+                  return arr
+                })()
               }
             ],
             response_format: { type: 'json_object' }
@@ -125,17 +180,32 @@ Tugas: Analisis gambar statistik/data yang dilampirkan dan buatkan artikel JSON 
       } else {
         const apiKey = resolveApiKey(settings.gemini_api_key, selectedApiKeyId)
         if (!apiKey) throw new Error('Gemini API Key missing in settings.')
-        const model = settings.active_model === 'gemini-3.0' ? 'gemini-3.0-flash' : 'gemini-2.5-flash'
+        const model = baseModel === 'gemini-3.0' ? 'gemini-3.0-flash' : baseModel
         const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             system_instruction: { parts: [{ text: systemPrompt }] },
             contents: [{
-              parts: [
-                { text: userPromptText },
-                { inlineData: { mimeType: mimeType, data: base64Image } }
-              ]
+              parts: (() => {
+                  const arr: any[] = [
+                    { text: userPromptText },
+                    { inlineData: { mimeType: mimeType, data: base64Image } }
+                  ]
+                  if (base64ExtraImage) {
+                     arr.push({ text: "\nGAMBAR KEDUA (KLASEMEN/TAMBAHAN):\n" })
+                     arr.push({ inlineData: { mimeType: extraMimeType, data: base64ExtraImage } })
+                  }
+                  if (base64H2HImage) {
+                     arr.push({ text: "\nGAMBAR KETIGA (STATISTIK HEAD TO HEAD):\n" })
+                     arr.push({ inlineData: { mimeType: h2hMimeType, data: base64H2HImage } })
+                  }
+                  if (base64HeroList) {
+                     arr.push({ text: "\nREFERENSI WAJAH & NAMA HERO MOBILE LEGENDS (GUNAKAN INI UNTUK MENEBAK HERO DI SCREENSHOT):\n" })
+                     arr.push({ inlineData: { mimeType: 'image/png', data: base64HeroList } })
+                  }
+                  return arr
+              })()
             }],
             generationConfig: { responseMimeType: 'application/json' }
           })
@@ -210,6 +280,42 @@ Tugas: Analisis gambar statistik/data yang dilampirkan dan buatkan artikel JSON 
       console.log('[ArtikelMode] VERIFIED ACTUAL TAGS DARI WP:', verified_tags)
     }
 
+    // Phase 3.5: Fetch Related Posts (Baca Juga) - maximum 3
+    let relatedPosts: Array<{ title: string, link: string }> = []
+    if (aiOutput.suggested_keywords && Array.isArray(aiOutput.suggested_keywords) && activeWp?.url) {
+      const authHeader = `Basic ${Buffer.from(`${activeWp.username}:${activeWp.password}`).toString('base64')}`
+      
+      const postSearchPromises = aiOutput.suggested_keywords.slice(0, 3).map(async (keyword: string) => {
+        try {
+          const encodedKeyword = encodeURIComponent(keyword)
+          const searchUrl = new URL(`/wp-json/wp/v2/posts?search=${encodedKeyword}&per_page=1&_fields=id,title,link`, activeWp.url)
+          const res = await fetch(searchUrl.toString(), {
+            headers: { Authorization: authHeader }
+          })
+          if (!res.ok) return null
+          
+          const postsMatches = await res.json()
+          if (postsMatches && postsMatches.length > 0) {
+            return {
+              title: postsMatches[0].title.rendered,
+              link: postsMatches[0].link
+            }
+          }
+        } catch (e) {
+          console.error(`Post search failed for ${keyword}:`, e)
+        }
+        return null
+      })
+
+      const postResults = await Promise.all(postSearchPromises)
+      const uniquePosts = new Map()
+      postResults.forEach(p => {
+        if (p && !uniquePosts.has(p.link)) uniquePosts.set(p.link, p)
+      })
+      relatedPosts = Array.from(uniquePosts.values()).slice(0, 3)
+      console.log('[ArtikelMode] RELATED POSTS DARI WP:', relatedPosts)
+    }
+
     // Phase 4: The Internal Link Injector (Regex Logic)
     let processedHtml = aiOutput.content_raw_html
     
@@ -239,6 +345,33 @@ Tugas: Analisis gambar statistik/data yang dilampirkan dan buatkan artikel JSON 
     placeholders.forEach((hdr, idx) => {
       processedHtml = processedHtml.replace(`___HEADER_PLACEHOLDER_${idx}___`, hdr)
     })
+
+    // Phase 4.5: Inject Related Articles HTML
+    if (relatedPosts.length > 0) {
+      const escapedTitle = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      
+      let pCount = 0
+      let relatedIndex = 0
+      
+      processedHtml = processedHtml.replace(/<\/p>/gi, (match: string) => {
+         pCount++
+         // Sisipkan satu artikel "Baca Juga" setiap jeda 2 paragraf
+         if (pCount % 2 === 0 && relatedIndex < relatedPosts.length) {
+            const p = relatedPosts[relatedIndex]
+            relatedIndex++
+            const relatedHtml = `\n<p><strong style="font-size: 16px;">Baca Juga: <a href="${p.link}" target="_blank" rel="noopener">${escapedTitle(p.title)}</a></strong></p>\n`
+            return match + relatedHtml
+         }
+         return match
+      })
+      
+      // Jika ada sisa artikel (misal karena paragraf terlalu pendek), letakkan di bawah
+      while (relatedIndex < relatedPosts.length) {
+         const p = relatedPosts[relatedIndex]
+         relatedIndex++
+         processedHtml += `\n<p><strong style="font-size: 16px;">Baca Juga: <a href="${p.link}" target="_blank" rel="noopener">${escapedTitle(p.title)}</a></strong></p>\n`
+      }
+    }
 
     aiOutput.content_raw_html = processedHtml
     aiOutput.selected_tags = verified_tags // Re-map to expected UI param

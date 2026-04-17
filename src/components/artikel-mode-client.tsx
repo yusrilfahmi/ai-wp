@@ -16,7 +16,8 @@ const MODES = [
   'Top Skor Terbaru',
   'Penilaian Pemain (Rating/Statistik)',
   'Bagan Turnamen (Bracket)',
-  'Hasil Laga Esports (Mobile Legends)'
+  'Hasil Laga Esports (Mobile Legends)',
+  'Jadwal'
 ]
 
 export function ArtikelModeClient() {
@@ -33,13 +34,19 @@ export function ArtikelModeClient() {
   const [apiKeyOptions, setApiKeyOptions] = useState<{id: string, label: string, type: string}[]>([])
   const [selectedApiKeyId, setSelectedApiKeyId] = useState<string>('')
   const [activeModel, setActiveModel] = useState<string>('')
+  const [selectedModelOverride, setSelectedModelOverride] = useState<string>('')
   
   const [modeArtikel, setModeArtikel] = useState(MODES[0])
   const [imageData, setImageData] = useState<File | null>(null)
   const [highlights, setHighlights] = useState('')
   const [isHoveringImageData, setIsHoveringImageData] = useState(false)
+  const [isHoveringExtraImageData, setIsHoveringExtraImageData] = useState(false)
   const [isHoveringThumbnail, setIsHoveringThumbnail] = useState(false)
   
+  const [extraImageData, setExtraImageData] = useState<File | null>(null)
+  const [headToHeadImageData, setHeadToHeadImageData] = useState<File | null>(null)
+  const [isHoveringHeadToHeadData, setIsHoveringHeadToHeadData] = useState(false)
+  const [penjelasanGambar, setPenjelasanGambar] = useState('')  
   const [uncroppedFile, setUncroppedFile] = useState<File | null>(null)
   const [thumbnail, setThumbnail] = useState<File | null>(null)
   const [previewMode, setPreviewMode] = useState<'preview' | 'html'>('preview')
@@ -69,7 +76,10 @@ export function ArtikelModeClient() {
   const handleClearForm = () => {
     setModeArtikel(MODES[0])
     setHighlights('')
+    setPenjelasanGambar('')
     setImageData(null)
+    setExtraImageData(null)
+    setHeadToHeadImageData(null)
     setThumbnail(null)
     setSumberGambarType('Instagram'); setSumberGambarUrl('Foto: instagram.com/');
     localStorage.removeItem('ai_wp_artikel_draft');
@@ -140,11 +150,35 @@ export function ArtikelModeClient() {
               break
            }
         }
+      } else if (isHoveringExtraImageData && e.clipboardData) {
+        const items = e.clipboardData.items
+        for (let i = 0; i < items.length; i++) {
+           if (items[i].type.indexOf('image') !== -1) {
+              const file = items[i].getAsFile()
+              if (file) {
+                 setExtraImageData(file)
+                 e.preventDefault()
+              }
+              break
+           }
+        }
+      } else if (isHoveringHeadToHeadData && e.clipboardData) {
+        const items = e.clipboardData.items
+        for (let i = 0; i < items.length; i++) {
+           if (items[i].type.indexOf('image') !== -1) {
+              const file = items[i].getAsFile()
+              if (file) {
+                 setHeadToHeadImageData(file)
+                 e.preventDefault()
+              }
+              break
+           }
+        }
       }
     }
     document.addEventListener('paste', handleGlobalPaste)
     return () => document.removeEventListener('paste', handleGlobalPaste)
-  }, [isHoveringImageData, isHoveringThumbnail])
+  }, [isHoveringImageData, isHoveringThumbnail, isHoveringExtraImageData, isHoveringHeadToHeadData])
 
   // Right form state (Outputs)
   const [generatedTitles, setGeneratedTitles] = useState<string[]>([])
@@ -212,11 +246,15 @@ export function ArtikelModeClient() {
     try {
       const formData = new FormData()
       formData.append('imageData', imageData)
+      if (extraImageData) formData.append('extraImageData', extraImageData)
+      if (headToHeadImageData) formData.append('headToHeadImageData', headToHeadImageData)
       formData.append('modeArtikel', modeArtikel)
       formData.append('sumberGambarUrl', sumberGambarUrl)
       if (highlights) formData.append('highlights', highlights)
+      if (penjelasanGambar) formData.append('penjelasanGambar', penjelasanGambar)
       if (selectedWpSiteId) formData.append('selectedWpSiteId', selectedWpSiteId)
       if (selectedApiKeyId) formData.append('selectedApiKeyId', selectedApiKeyId)
+      if (selectedModelOverride) formData.append('selectedModelOverride', selectedModelOverride)
 
       const res = await processImageContentAction(formData)
 
@@ -294,7 +332,7 @@ export function ArtikelModeClient() {
           
           {/* Main Image Data for AI */}
           <div>
-             <label className="text-sm font-medium text-gray-700">Image Data (Untuk dianalisis AI)</label>
+             <label className="text-sm font-medium text-gray-700">{modeArtikel === 'Jadwal' ? 'Gambar Utama (Jadwal Pertandingan)' : 'Image Data (Untuk dianalisis AI)'}</label>
              <div 
                className="mt-1 flex justify-center rounded-lg border-2 border-dashed border-gray-300 px-6 py-6 hover:border-blue-500 transition-colors bg-blue-50/50 focus-within:ring-2 focus-within:ring-blue-500 cursor-pointer relative min-h-[160px] items-center"
                onPaste={handlePasteImageData}
@@ -337,7 +375,7 @@ export function ArtikelModeClient() {
              </div>
           </div>
 
-          <div className="bg-gray-50 p-4 rounded-lg border border-gray-200/50">
+           <div className="bg-gray-50 p-4 rounded-lg border border-gray-200/50">
              <label className="text-sm font-medium text-gray-700 mb-2 block">Pilih Mode Artikel</label>
              <div className="flex flex-col gap-2">
                 {MODES.map(mode => (
@@ -352,6 +390,121 @@ export function ArtikelModeClient() {
                 ))}
              </div>
           </div>
+
+          {modeArtikel === 'Hasil Laga Esports (Mobile Legends)' && (
+            <div className="space-y-4 bg-blue-50/30 p-4 rounded-xl border border-blue-100">
+               <div>
+                  <label className="text-sm font-medium text-blue-800 block">Gambar Tambahan (Klasemen dll)</label>
+                  <p className="text-[10px] text-blue-600 mb-2 mt-0.5">Opsional. Data klasemen terbaru atau penunjang artikel laga esports.</p>
+                  <div 
+                    className="mt-1 flex justify-center rounded-lg border-2 border-dashed border-blue-300 px-6 py-4 hover:border-blue-500 transition-colors bg-white focus-within:ring-2 focus-within:ring-blue-500 cursor-pointer relative min-h-[120px] items-center"
+                    onMouseEnter={() => setIsHoveringExtraImageData(true)}
+                    onMouseLeave={() => setIsHoveringExtraImageData(false)}
+                    tabIndex={0}
+                  >
+                     {extraImageData ? (
+                       <div className="text-center w-full">
+                          <img src={URL.createObjectURL(extraImageData)} alt="Extra Data Preview" className="mx-auto h-32 w-auto object-contain rounded-md mb-2 border border-gray-200 shadow-sm" />
+                          <p className="text-xs font-medium text-gray-700 truncate max-w-[200px] mx-auto">{extraImageData.name}</p>
+                       </div>
+                     ) : (
+                       <div className="text-center">
+                          <FileImage className="mx-auto h-8 w-8 text-blue-300 mb-2" aria-hidden="true" />
+                          <div className="flex text-xs leading-6 text-gray-600 items-center justify-center gap-1">
+                             <span className="font-medium text-blue-600">Klik / Paste (Ctrl+V)</span>
+                          </div>
+                          <p className="text-[10px] text-gray-400">Silakan area ini disorot lalu paste gambar</p>
+                       </div>
+                     )}
+                     
+                     <input 
+                       type="file" 
+                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+                       accept="image/*" 
+                       onChange={e => {
+                         const file = e.target.files?.[0]
+                         if (file) {
+                           setExtraImageData(file)
+                           e.target.value = ''
+                         }
+                       }} 
+                     />
+                  </div>
+               </div>
+
+               <div>
+                 <label className="text-sm font-medium text-blue-800 block">
+                    Penjelasan Gambar
+                    <span className="text-xs text-blue-500 font-normal ml-1">(Opsional)</span>
+                 </label>
+                 <textarea 
+                   value={penjelasanGambar} onChange={e => setPenjelasanGambar(e.target.value)} 
+                   className="input-field mt-1 min-h-[60px] text-sm bg-white" 
+                   placeholder="Beri arahan tambahan pada AI tentang gambar khusus MLBB ini..."
+                 />
+               </div>
+            </div>
+          )}
+
+          {modeArtikel === 'Jadwal' && (
+            <div className="space-y-4 bg-orange-50/30 p-4 rounded-xl border border-orange-100">
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div>
+                    <label className="text-sm font-medium text-orange-800 block">Gambar Klasemen</label>
+                    <p className="text-[10px] text-orange-600 mb-2 mt-0.5">Wajib: Data posisi tim di klasemen.</p>
+                    <div 
+                      className="mt-1 flex justify-center rounded-lg border-2 border-dashed border-orange-300 px-4 py-4 hover:border-orange-500 transition-colors bg-white focus-within:ring-2 focus-within:ring-orange-500 cursor-pointer relative min-h-[120px] items-center"
+                      onMouseEnter={() => setIsHoveringExtraImageData(true)}
+                      onMouseLeave={() => setIsHoveringExtraImageData(false)}
+                      tabIndex={0}
+                    >
+                       {extraImageData ? (
+                         <div className="text-center w-full">
+                            <img src={URL.createObjectURL(extraImageData)} alt="Extra Data Preview" className="mx-auto h-24 w-auto object-contain rounded-md mb-2 border border-gray-200 shadow-sm" />
+                            <p className="text-xs font-medium text-gray-700 truncate max-w-[150px] mx-auto">{extraImageData.name}</p>
+                         </div>
+                       ) : (
+                         <div className="text-center">
+                            <FileImage className="mx-auto h-6 w-6 text-orange-300 mb-1" aria-hidden="true" />
+                            <span className="text-xs font-medium text-orange-600 block">Klik / Paste</span>
+                         </div>
+                       )}
+                       <input 
+                         type="file" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept="image/*" 
+                         onChange={e => { const file = e.target.files?.[0]; if (file) { setExtraImageData(file); e.target.value = '' } }} 
+                       />
+                    </div>
+                 </div>
+
+                 <div>
+                    <label className="text-sm font-medium text-orange-800 block">Gambar Head to Head</label>
+                    <p className="text-[10px] text-orange-600 mb-2 mt-0.5">Opsional: Rekor/sejarah pertemuan.</p>
+                    <div 
+                      className="mt-1 flex justify-center rounded-lg border-2 border-dashed border-orange-300 px-4 py-4 hover:border-orange-500 transition-colors bg-white focus-within:ring-2 focus-within:ring-orange-500 cursor-pointer relative min-h-[120px] items-center"
+                      onMouseEnter={() => setIsHoveringHeadToHeadData(true)}
+                      onMouseLeave={() => setIsHoveringHeadToHeadData(false)}
+                      tabIndex={0}
+                    >
+                       {headToHeadImageData ? (
+                         <div className="text-center w-full">
+                            <img src={URL.createObjectURL(headToHeadImageData)} alt="H2H Preview" className="mx-auto h-24 w-auto object-contain rounded-md mb-2 border border-gray-200 shadow-sm" />
+                            <p className="text-xs font-medium text-gray-700 truncate max-w-[150px] mx-auto">{headToHeadImageData.name}</p>
+                         </div>
+                       ) : (
+                         <div className="text-center">
+                            <FileImage className="mx-auto h-6 w-6 text-orange-300 mb-1" aria-hidden="true" />
+                            <span className="text-xs font-medium text-orange-600 block">Klik / Paste</span>
+                         </div>
+                       )}
+                       <input 
+                         type="file" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept="image/*" 
+                         onChange={e => { const file = e.target.files?.[0]; if (file) { setHeadToHeadImageData(file); e.target.value = '' } }} 
+                       />
+                    </div>
+                 </div>
+               </div>
+            </div>
+          )}
 
            <div>
              <label className="text-sm font-medium text-gray-700 block mt-4 flex items-center justify-between">
@@ -453,20 +606,30 @@ export function ArtikelModeClient() {
           <div>
             <label className="text-sm font-medium text-gray-700 mb-2 block">Reference Judul</label>
             {generatedTitles.length > 0 ? (
-              <div className="space-y-2 bg-gray-50 p-2 rounded-lg border border-gray-200">
-                {generatedTitles.map((title, idx) => (
-                  <label key={idx} className="flex items-center gap-3 p-2 rounded hover:bg-gray-100 cursor-pointer transition-colors bg-white border border-gray-200">
-                    <input 
-                      type="radio" 
-                      name="selectedTitle" 
-                      value={title} 
-                      checked={selectedTitle === title}
-                      onChange={() => setSelectedTitle(title)}
-                      className="accent-emerald-500 w-4 h-4 mt-0.5"
-                    />
-                    <span className="text-sm font-medium leading-tight">{title}</span>
-                  </label>
-                ))}
+              <div className="space-y-4">
+                <div className="space-y-2 bg-gray-50 p-2 rounded-lg border border-gray-200 h-40 overflow-y-auto">
+                  {generatedTitles.map((title, idx) => (
+                    <label key={idx} className="flex items-start gap-3 p-2 rounded hover:bg-gray-100 cursor-pointer transition-colors bg-white border border-gray-200">
+                      <input 
+                        type="radio" 
+                        name="selectedTitle" 
+                        value={title} 
+                        checked={selectedTitle === title}
+                        onChange={() => setSelectedTitle(title)}
+                        className="accent-emerald-500 w-4 h-4 mt-1 flex-shrink-0"
+                      />
+                      <span className="text-sm font-medium leading-tight">{title}</span>
+                    </label>
+                  ))}
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-emerald-700 mb-1 block flex items-center gap-1">Judul Final (Bisa Diedit):</label>
+                   <input 
+                     value={selectedTitle} onChange={e => setSelectedTitle(e.target.value)} 
+                     className="input-field border-emerald-300 focus:ring-emerald-500 bg-emerald-50/30 font-medium text-emerald-900" 
+                     placeholder="Pilih dari atas atau ketik judul Anda sendiri..."
+                   />
+                </div>
               </div>
             ) : (
               <div className="text-sm text-gray-500 italic p-4 bg-gray-100/50 rounded-lg text-center border border-dashed border-gray-200">
@@ -544,9 +707,34 @@ export function ArtikelModeClient() {
             </div>
 
             <div>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Pilih Model AI</label>
+              <select
+                 className="input-field"
+                 value={selectedModelOverride}
+                 onChange={e => {
+                   const newVal = e.target.value;
+                   setSelectedModelOverride(newVal);
+                   const isOr = newVal === 'openrouter' || (!newVal && activeModel === 'openrouter');
+                   const reqType = isOr ? 'openrouter' : 'gemini';
+                   const firstKey = apiKeyOptions.find(k => k.type === reqType);
+                   if (firstKey) setSelectedApiKeyId(firstKey.id);
+                 }}
+              >
+                 <option value="">Gunakan Default dari Settings</option>
+                 <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite Preview</option>
+                 <option value="gemini-3-flash-preview">Gemini 3 Flash Preview</option>
+                 <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                 <option value="openrouter">OpenRouter (Sesuai Settings)</option>
+              </select>
+            </div>
+
+            <div>
               <label className="text-xs font-medium text-gray-600 mb-1 block">API Key</label>
               {(() => {
-                const filteredKeys = apiKeyOptions.filter(k => k.type === activeModel || (activeModel !== 'openrouter' && k.type === 'gemini'))
+                const reqType = selectedModelOverride 
+                                  ? (selectedModelOverride === 'openrouter' ? 'openrouter' : 'gemini') 
+                                  : (activeModel === 'openrouter' ? 'openrouter' : 'gemini')
+                const filteredKeys = apiKeyOptions.filter(k => k.type === reqType)
                 return filteredKeys.length === 0 ? (
                   <div className="text-xs text-gray-400 italic">Belum ada API key terkonfigurasi</div>
                 ) : (

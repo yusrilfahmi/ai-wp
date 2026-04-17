@@ -136,6 +136,7 @@ export async function processContentAction(data: {
   rawScrapedText: string
   selectedWpSiteId?: string
   selectedApiKeyId?: string
+  selectedModelOverride?: string
 }) {
   try {
     const settings = await getSettings()
@@ -152,7 +153,10 @@ export async function processContentAction(data: {
     const systemPrompt = `${basePersona}${injectedCustomPrompt}
 CRITICAL RULES FOR CONTENT & KEYWORDS:
 1. KEYWORDS: Extract up to 5 highly specific, core entities (e.g., Player Names, Team Names, Concepts) from the article. Output purely as an array of strings. Do not infer distant relationships.
-2. 10 TITLES (REPRESENTATIVE & SPOK): The provided 'Fix Judul' is ONLY A REFERENCE. You MUST read the provided scraped content and highlights, then generate EXACTLY 10 new, factual titles that accurately represent the ENTIRE article. Avoid sensational clickbait. Strictly follow the SPOK (Subjek, Predikat, Objek, Keterangan) structure in Indonesian and Title Case (EYD/PUEBI).
+2. 10 TITLES (REPRESENTATIVE & SPOK): The provided 'Fix Judul' is ONLY A REFERENCE. You MUST generate EXACTLY 10 new, factual titles.
+   - PUEBI/EYD TITLE CASE: Semua kata hubung dan kata depan (dan, di, ke, dari, yang, untuk, pada, dalam, dengan) WAJIB ditulis secara huruf kecil di judul!
+   - GAYA BAHASA JURNALISTIK: Gunakan diksi berita yang luwes dan "punchy". Hindari bahasa formal yang terlalu kaku. Gunakan pemendekan kata (contoh: "mengincar" -> "incar", "tidak akan" -> "tak akan", "membawa" -> "bawa").
+   - Strictly follow the SPOK (Subjek, Predikat, Objek, Keterangan) structure accurately without sensational clickbait.
 3. QUOTES & STATEMENTS: You MUST state the specific assigned source or person when writing a quote. CRITICAL HTML RULE: Whenever you include a direct statement, interview excerpt, or quote, you MUST wrap the ENTIRE quote and its attribution strictly inside an HTML <blockquote> tag. Do NOT simply use quotation marks inside a regular <p> tag. Example Format: <blockquote>"Pertandingan yang sangat sulit, tapi kami bangga," ujar Jay Idzes.</blockquote>
 4. LEAD PARAGRAPH (5W1H): The FIRST TWO paragraphs (<p>) of the article MUST be the "Lead". They MUST directly answer the Title and contain the 5W1H elements (What, Who, When, Where, Why, How) based on the scraped text. Do not start with empty fluff or filler sentences; get straight to the facts.
 5. ARTICLE STRUCTURE:
@@ -172,7 +176,7 @@ Output MUST be strictly in JSON format:
 
     const userPrompt = `Input Data:
 Titles (Fix Judul): ${data.fixJudul}
-Highlights: ${data.highlights}
+${data.highlights ? `\n===================================\nINSTRUKSI MUTLAK (HIGHLIGHT UTAMA):\nAnda WAJIB dan HARUS memastikan seluruh isi artikel sejalan, merepresentasikan, dan memasukkan poin-poin berikut ini:\n[ ${data.highlights} ]\n===================================\n` : ''}
 
 === SCRAPED SOURCE CONTENT ===
 ${data.rawScrapedText || '[No source content provided — write based on the title and highlights only]'}`
@@ -186,9 +190,12 @@ ${data.rawScrapedText || '[No source content provided — write based on the tit
 
     let generatedJsonString = ''
 
+    const baseModel = data.selectedModelOverride || settings.active_model || 'gemini-2.5-flash'
+    const useOpenRouter = baseModel === 'openrouter'
+
     // Helper to call the AI once and return the raw JSON string
     const callAi = async (): Promise<string> => {
-      if (settings.active_model === 'openrouter') {
+      if (useOpenRouter) {
         const orKey = resolveApiKey(settings.openrouter_api_key, data.selectedApiKeyId)
         if (!orKey || !settings.openrouter_model_string) throw new Error('OpenRouter Model String or API Key is missing in settings.')
         const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -209,8 +216,7 @@ ${data.rawScrapedText || '[No source content provided — write based on the tit
       } else {
         const apiKey = resolveApiKey(settings.gemini_api_key, data.selectedApiKeyId)
         if (!apiKey) throw new Error('Gemini API Key missing in settings.')
-        // const model = settings.active_model === 'gemini-3.0' ? 'gemini-3.0-flash' : 'gemini-2.5-flash'
-        const model = settings.active_model
+        const model = baseModel === 'gemini-3.0' ? 'gemini-3.0-flash' : baseModel
         const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -288,6 +294,43 @@ ${data.rawScrapedText || '[No source content provided — write based on the tit
       console.log("VERIFIED ACTUAL TAGS DARI WP:", verified_tags)
     }
 
+    // Phase 3.5: Fetch Related Posts (Baca Juga) - maximum 3
+    let relatedPosts: Array<{ title: string, link: string }> = []
+    if (aiOutput.suggested_keywords && Array.isArray(aiOutput.suggested_keywords) && activeWp?.url) {
+      const authHeader = `Basic ${Buffer.from(`${activeWp.username}:${activeWp.password}`).toString('base64')}`
+      
+      // Use up to 3 keywords to find related articles
+      const postSearchPromises = aiOutput.suggested_keywords.slice(0, 3).map(async (keyword: string) => {
+        try {
+          const encodedKeyword = encodeURIComponent(keyword)
+          const searchUrl = new URL(`/wp-json/wp/v2/posts?search=${encodedKeyword}&per_page=1&_fields=id,title,link`, activeWp.url)
+          const res = await fetch(searchUrl.toString(), {
+            headers: { Authorization: authHeader }
+          })
+          if (!res.ok) return null
+          
+          const postsMatches = await res.json()
+          if (postsMatches && postsMatches.length > 0) {
+            return {
+              title: postsMatches[0].title.rendered,
+              link: postsMatches[0].link
+            }
+          }
+        } catch (e) {
+          console.error(`Post search failed for ${keyword}:`, e)
+        }
+        return null
+      })
+
+      const postResults = await Promise.all(postSearchPromises)
+      const uniquePosts = new Map()
+      postResults.forEach(p => {
+        if (p && !uniquePosts.has(p.link)) uniquePosts.set(p.link, p)
+      })
+      relatedPosts = Array.from(uniquePosts.values()).slice(0, 3)
+      console.log('RELATED POSTS DARI WP:', relatedPosts)
+    }
+
     // Phase 4: The Internal Link Injector (Regex Logic)
     let processedHtml = aiOutput.content_raw_html
     
@@ -317,6 +360,33 @@ ${data.rawScrapedText || '[No source content provided — write based on the tit
     placeholders.forEach((hdr, idx) => {
       processedHtml = processedHtml.replace(`___HEADER_PLACEHOLDER_${idx}___`, hdr)
     })
+
+    // Phase 4.5: Inject Related Articles HTML
+    if (relatedPosts.length > 0) {
+      const escapedTitle = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      
+      let pCount = 0
+      let relatedIndex = 0
+      
+      processedHtml = processedHtml.replace(/<\/p>/gi, (match: string) => {
+         pCount++
+         // Sisipkan satu artikel "Baca Juga" setiap jeda 2 paragraf
+         if (pCount % 2 === 0 && relatedIndex < relatedPosts.length) {
+            const p = relatedPosts[relatedIndex]
+            relatedIndex++
+            const relatedHtml = `\n<p><strong style="font-size: 16px;">Baca Juga: <a href="${p.link}" target="_blank" rel="noopener">${escapedTitle(p.title)}</a></strong></p>\n`
+            return match + relatedHtml
+         }
+         return match
+      })
+      
+      // Jika ada sisa artikel (misal karena paragraf terlalu pendek), letakkan di bawah
+      while (relatedIndex < relatedPosts.length) {
+         const p = relatedPosts[relatedIndex]
+         relatedIndex++
+         processedHtml += `\n<p><strong style="font-size: 16px;">Baca Juga: <a href="${p.link}" target="_blank" rel="noopener">${escapedTitle(p.title)}</a></strong></p>\n`
+      }
+    }
 
     aiOutput.content_raw_html = processedHtml
     aiOutput.selected_tags = verified_tags // Re-map to expected UI param
