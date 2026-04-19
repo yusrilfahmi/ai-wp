@@ -52,6 +52,7 @@ export async function draftPostAction(formData: FormData) {
            'Authorization': authHeader,
            'Content-Disposition': `attachment; filename="${safeFilename}"`,
            'Content-Type': thumbnail.type,
+           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
          },
          body: buffer
        })
@@ -69,7 +70,8 @@ export async function draftPostAction(formData: FormData) {
          method: 'POST',
          headers: {
            'Authorization': authHeader,
-           'Content-Type': 'application/json'
+           'Content-Type': 'application/json',
+           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
          },
          body: JSON.stringify({
            alt_text: image_alt,
@@ -93,7 +95,8 @@ export async function draftPostAction(formData: FormData) {
       method: 'POST',
       headers: {
         'Authorization': authHeader,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
       },
       body: JSON.stringify(postPayload)
     })

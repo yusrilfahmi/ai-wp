@@ -21,7 +21,11 @@ export async function getWpCategoriesAction(wpSiteId?: string) {
     const categoryUrl = new URL('/wp-json/wp/v2/categories?per_page=100', activeWp.url)
     
     const res = await fetch(categoryUrl.toString(), {
-      headers: { Authorization: authHeader },
+      headers: { 
+        Authorization: authHeader,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+      },
       cache: 'no-store' 
     })
 
