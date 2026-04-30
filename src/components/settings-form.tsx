@@ -15,7 +15,9 @@ export function SettingsForm({ initialData }: { initialData?: UserSettings | nul
   const [customPrompt, setCustomPrompt] = useState(initialData?.custom_prompt || '')
 
   const [geminiKeys, setGeminiKeys] = useState<ApiKeyItem[]>(() => parseApiKeys(initialData?.gemini_api_key))
-  const [openRouterKeys, setOpenRouterKeys] = useState<ApiKeyItem[]>(() => parseApiKeys(initialData?.openrouter_api_key))
+  const allOtherKeys = parseApiKeys(initialData?.openrouter_api_key)
+  const [openRouterKeys, setOpenRouterKeys] = useState<ApiKeyItem[]>(() => allOtherKeys.filter(k => k.provider === 'openrouter' || !k.provider))
+  const [dashScopeKeys, setDashScopeKeys] = useState<ApiKeyItem[]>(() => allOtherKeys.filter(k => k.provider === 'dashscope'))
   const [wpSites, setWpSites] = useState<WpSiteItem[]>(() => parseWpSites(initialData?.wp_site_url, initialData?.wp_username, initialData?.wp_app_password))
 
   const handleSetGeminiActive = (id: string) => {
@@ -23,6 +25,9 @@ export function SettingsForm({ initialData }: { initialData?: UserSettings | nul
   }
   const handleSetOpenRouterActive = (id: string) => {
     setOpenRouterKeys(prev => prev.map(k => ({ ...k, is_active: k.id === id })))
+  }
+  const handleSetDashScopeActive = (id: string) => {
+    setDashScopeKeys(prev => prev.map(k => ({ ...k, is_active: k.id === id })))
   }
   const handleSetWpActive = (id: string) => {
     setWpSites(prev => prev.map(s => ({ ...s, is_active: s.id === id })))
@@ -42,7 +47,10 @@ export function SettingsForm({ initialData }: { initialData?: UserSettings | nul
         openrouter_model_string: openRouterModelString,
         custom_prompt: customPrompt,
         gemini_api_key: JSON.stringify(geminiKeys),
-        openrouter_api_key: JSON.stringify(openRouterKeys),
+        openrouter_api_key: JSON.stringify([
+          ...openRouterKeys.map(k => ({ ...k, provider: 'openrouter' })),
+          ...dashScopeKeys.map(k => ({ ...k, provider: 'dashscope' }))
+        ]),
         wp_site_url: JSON.stringify(wpSites),
         wp_username: '',
         wp_app_password: ''
@@ -78,6 +86,8 @@ export function SettingsForm({ initialData }: { initialData?: UserSettings | nul
                 <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                 <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite Preview</option>
                 <option value="gemini-3-flash-preview">Gemini 3 Flash Preview</option>
+                <option value="openrouter">OpenRouter (Custom)</option>
+                <option value="qwen3.5-flash">Alibaba Qwen 3.5 Flash</option>
               </select>
               <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
                 <ChevronDown className="w-4 h-4 text-gray-400" />
@@ -147,7 +157,7 @@ export function SettingsForm({ initialData }: { initialData?: UserSettings | nul
               <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline border border-blue-100 rounded px-2 py-1 bg-blue-50">Ambil API Key</a>
             </div>
             {openRouterKeys.map(k => (
-              <div key={k.id} className={`flex items-start gap-3 p-3 rounded-lg border \${k.is_active ? 'border-indigo-500 bg-indigo-50/30' : 'border-gray-200 bg-gray-50'}`}>
+              <div key={k.id} className={`flex items-start gap-3 p-3 rounded-lg border ${k.is_active ? 'border-indigo-500 bg-indigo-50/30' : 'border-gray-200 bg-gray-50'}`}>
                 <input type="radio" name="active_openrouter" className="mt-2.5 h-4 w-4 bg-white accent-indigo-600" checked={k.is_active} onChange={() => handleSetOpenRouterActive(k.id)} />
                 <div className="flex-1 space-y-2">
                   <input type="text" placeholder="Label Akun (Opsional)" className="input-field text-sm py-1.5" value={k.label} onChange={e => setOpenRouterKeys(prev => prev.map(x => x.id === k.id ? { ...x, label: e.target.value } : x))} />
@@ -156,7 +166,28 @@ export function SettingsForm({ initialData }: { initialData?: UserSettings | nul
                 <button type="button" onClick={() => setOpenRouterKeys(prev => prev.filter(x => x.id !== k.id))} className="text-gray-400 hover:text-red-500 p-2"><Trash2 className="w-4 h-4"/></button>
               </div>
             ))}
-            <button type="button" onClick={() => setOpenRouterKeys(prev => [...prev, { id: Date.now().toString(), label: `Akun OpenRouter \${prev.length+1}`, key: '', is_active: prev.length === 0 }])} className="text-xs font-medium text-indigo-600 flex items-center gap-1 hover:underline"><Plus className="w-3 h-3"/> Tambah Akun OpenRouter</button>
+            <button type="button" onClick={() => setOpenRouterKeys(prev => [...prev, { id: Date.now().toString(), label: `Akun OpenRouter ${prev.length+1}`, key: '', is_active: prev.length === 0, provider: 'openrouter' }])} className="text-xs font-medium text-indigo-600 flex items-center gap-1 hover:underline"><Plus className="w-3 h-3"/> Tambah Akun OpenRouter</button>
+          </div>
+
+          <div className="border-t border-gray-100 my-4" />
+
+          {/* DashScope List */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-semibold text-gray-800">Alibaba DashScope (Model Studio) API Keys</label>
+              <a href="https://modelstudio.console.alibabacloud.com/ap-southeast-1" target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline border border-blue-100 rounded px-2 py-1 bg-blue-50">API Keys</a>
+            </div>
+            {dashScopeKeys.map(k => (
+              <div key={k.id} className={`flex items-start gap-3 p-3 rounded-lg border ${k.is_active ? 'border-indigo-500 bg-indigo-50/30' : 'border-gray-200 bg-gray-50'}`}>
+                <input type="radio" name="active_dashscope" className="mt-2.5 h-4 w-4 bg-white accent-indigo-600" checked={k.is_active} onChange={() => handleSetDashScopeActive(k.id)} />
+                <div className="flex-1 space-y-2">
+                  <input type="text" placeholder="Label Akun (Opsional)" className="input-field text-sm py-1.5" value={k.label} onChange={e => setDashScopeKeys(prev => prev.map(x => x.id === k.id ? { ...x, label: e.target.value } : x))} />
+                  <input type="password" placeholder="sk-..." className="input-field text-sm py-1.5" value={k.key} onChange={e => setDashScopeKeys(prev => prev.map(x => x.id === k.id ? { ...x, key: e.target.value } : x))} />
+                </div>
+                <button type="button" onClick={() => setDashScopeKeys(prev => prev.filter(x => x.id !== k.id))} className="text-gray-400 hover:text-red-500 p-2"><Trash2 className="w-4 h-4"/></button>
+              </div>
+            ))}
+            <button type="button" onClick={() => setDashScopeKeys(prev => [...prev, { id: Date.now().toString(), label: `Akun DashScope ${prev.length+1}`, key: '', is_active: prev.length === 0, provider: 'dashscope' }])} className="text-xs font-medium text-indigo-600 flex items-center gap-1 hover:underline"><Plus className="w-3 h-3"/> Tambah Akun DashScope</button>
           </div>
         </div>
       </div>

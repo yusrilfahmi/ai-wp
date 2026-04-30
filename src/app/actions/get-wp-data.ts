@@ -75,14 +75,22 @@ export async function getApiKeyOptionsAction() {
       is_active: k.is_active
     }))
 
-    const orKeys = parseApiKeys(settings.openrouter_api_key).map(k => ({
+    const allOtherKeys = parseApiKeys(settings.openrouter_api_key)
+    const orKeys = allOtherKeys.filter(k => k.provider === 'openrouter' || !k.provider).map(k => ({
       id: k.id,
       label: k.label,
       type: 'openrouter' as const,
       is_active: k.is_active
     }))
 
-    return { data: { gemini: geminiKeys, openrouter: orKeys, active_model: settings.active_model } }
+    const dsKeys = allOtherKeys.filter(k => k.provider === 'dashscope').map(k => ({
+      id: k.id,
+      label: k.label,
+      type: 'dashscope' as const,
+      is_active: k.is_active
+    }))
+
+    return { data: { gemini: geminiKeys, openrouter: orKeys, dashscope: dsKeys, active_model: settings.active_model } }
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Server error' }
   }

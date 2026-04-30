@@ -2,6 +2,7 @@
 
 import { getSettings } from '@/app/actions/settings'
 import { getActiveApiKey, getActiveWpSite, parseApiKeys, parseWpSites } from '@/lib/settings-parser'
+import { convertToGutenberg } from '@/lib/gutenberg-converter'
 import fs from 'fs'
 import path from 'path'
 
@@ -23,6 +24,7 @@ export async function processImageContentAction(formData: FormData) {
     const imageFile = formData.get('imageData') as File
     const extraImageFile = formData.get('extraImageData') as File | null
     const headToHeadImageFile = formData.get('headToHeadImageData') as File | null
+    const dynamicImages = formData.getAll('dynamicImages') as File[]
     const penjelasanGambar = formData.get('penjelasanGambar') as string | null
     const selectedWpSiteId = formData.get('selectedWpSiteId') as string | null
     const selectedApiKeyId = formData.get('selectedApiKeyId') as string | null
@@ -54,6 +56,11 @@ export async function processImageContentAction(formData: FormData) {
       h2hMimeType = headToHeadImageFile.type
     }
 
+    const dynamicImagesBase64 = await Promise.all(dynamicImages.map(async img => {
+      const b = await img.arrayBuffer()
+      return { mime: img.type, data: Buffer.from(b).toString('base64') }
+    }))
+
     let base64HeroList: string | null = null
     const isEsportsMode = modeArtikel === 'Hasil Laga Esports (Mobile Legends)'
     if (isEsportsMode) {
@@ -68,7 +75,7 @@ export async function processImageContentAction(formData: FormData) {
     }
 
     // Phase 2: Multimodal AI Content Generation (Image to JSON)
-    const basePersona = `You are an expert sports journalist writing hard news articles in formal Indonesian (Bahasa Indonesia baku).`
+    const basePersona = `You are an expert sports journalist writing hard news articles in formal Indonesian (Bahasa Indonesia baku). SELURUH OUTPUT WAJIB DALAM BAHASA INDONESIA. Jangan gunakan bahasa lain selain Bahasa Indonesia dalam artikel, judul, meta description, maupun tag reasoning.`
     const injectedCustomPrompt = settings.custom_prompt ? `\nUSER SPECIFIC INSTRUCTIONS: ${settings.custom_prompt}\n` : ''
 
     const systemPrompt = `${basePersona}${injectedCustomPrompt}
@@ -79,9 +86,10 @@ CRITICAL RULES FOR CONTENT & FORMATTING:
 
 2. MODE-SPECIFIC RULES (You are writing for mode: "${modeArtikel}"):
    - If "hasil" or "hasil sementara": Do NOT use the word "Akhir" in titles. Use "Hasil [Tim A] vs [Tim B] [Skor]".
-   - If "rating pemain": Do NOT use the word "Rapor". Use "Penilaian", "Nilai", or "Evaluasi". You MUST include an HTML table (Posisi | Nama Pemain | Nilai).
-   - If "top skor" or "klasemen": You MUST include an HTML table representing the standings or top scorers based on the image.
+   - If "rating pemain" or "penilaian pemain": Do NOT use the word "Rapor". Use "Penilaian", "Nilai", or "Evaluasi". You MUST include an HTML table (Posisi | Nama Pemain | Nilai). Tulis semua rating pemain ya, dan pisahkan satu tim satu sub bab.
+   - If "top skor" or "klasemen": You MUST include an HTML table representing the standings or top scorers based on the image. Masukkan lengkap klasemen semua tim.
    - If "esports": Do not mention player names individually for hero drafts, just mention the team's overall hero composition.
+   - If "artikel lain": Focus entirely on fulfilling the specific instructions from the MUTLAK HIGHLIGHT section provided by the user. Maintain the same high-quality journalism style as other modes.
 
 3. PLAYER NAMES & TERMINOLOGY:
    - NEVER abbreviate player names (e.g., "Putra B." MUST be expanded to "Beckham Putra").
@@ -96,6 +104,7 @@ CRITICAL RULES FOR CONTENT & FORMATTING:
 
 5. TITLES (STRICT FEW-SHOT EXAMPLES):
    - Generate EXACTLY 5 reference titles.
+   - BATAS MAKSIMAL: Setiap judul MAKSIMAL 14 KATA. Jika lebih dari 14 kata, padatkan agar tetap informatif.
    - PUEBI/EYD TITLE CASE: Semua kata hubung dan kata depan (dan, di, ke, dari, yang, untuk, pada, dalam, dengan) WAJIB ditulis dengan huruf kecil di judul!
    - GAYA BAHASA JURNALISTIK: Gunakan diksi berita gaya olahraga yang luwes dan "punchy". Hindari kata awalan formal yang kaku. Gunakan pemendekan kata dasar (contoh: "mengincar" -> "incar", "tidak akan" -> "tak akan", "membawa" -> "bawa").
    - FORMATTING: Titles MUST use a "Two-Part Structure" separated by a colon (:). Part 1 is the Core Fact (Result/Standings/Rating). Part 2 is the Key Highlight in SPOK structure.
@@ -109,6 +118,7 @@ CRITICAL RULES FOR CONTENT & FORMATTING:
      * Mode "bagan turnamen": "Bagan Perempat Final Liga Champions: Singkirkan Bayer Leverkusen, Arsenal Tantang Sporting CP"
      * Mode "jadwal": "Jadwal Pertandingan Liga Inggris: Arsenal Menantang Manchester City di Emirates Stadium. (PENTING: Di mode ini Anda membuat artikel preview/jadwal laga. Gambar pertama = Jadwal Utama, Gambar kedua = Klasemen, Gambar ketiga = Statistik Head to Head. Rangkum info penting dari ketiganya secara urut.)"
      * Mode "esports": "Hasil Bigetron Alpha vs Alter Ego 2-1: Sengit Hingga Gim Ketiga, Skuad Robot Merah Kunci Kemenangan. (ATURAN MUTLAK HERO DRAFT: JANGAN MENGARANG BEBAS NAMA HERO! AI harus melihat 1 per 1 wajah kecil hero yang ada di screenshot laga, lalu MENCOCOKKAN SECARA VISUAL SATU PER SATU wajah/ikon tersebut ke dalam daftar wajah yang ada di gambar referensi 'hero_list_mlbb'. Hanya tulis nama hero yang fotonya 100% identik di gambar referensi. Jika tidak yakin, tulis 'beberapa hero andalan'. JANGAN menyebut hero yang wajahnya tidak ada! Jika ada gambar klasemen tambahan, bahas klasemen tersebut.)"
+     * Mode "artikel lain": Judul disesuaikan dengan fokus perintah pada instruksi MUTLAK HIGHLIGHT. Bebas namun tetap ikuti PUEBI/EYD SPOK journalism format.
 
 Output MUST be strictly in JSON format (DO NOT wrap in markdown \`\`\`json blocks):
 {
@@ -125,21 +135,23 @@ Sumber Gambar: ${sumberGambar}
 ${penjelasanGambar ? `Penjelasan Gambar: ${penjelasanGambar}\n` : ''}${highlights ? `\n===================================\nINSTRUKSI MUTLAK (HIGHLIGHT UTAMA):\nAnda WAJIB dan HARUS memastikan seluruh isi artikel sejalan, merepresentasikan, dan memasukkan poin-poin berikut ini. Highlight ini adalah panduan UTAMA arah artikel, LEBIH PENTING dari pada opini data lainnya:\n[ ${highlights} ]\n===================================\n` : ''}Tugas: Analisis gambar statistik/data yang dilampirkan dan buatkan artikel JSON sesuai dengan mode yang dipilih.`
 
     // Resolve which API key to use (override or global active)
-    const resolveApiKey = (dbString: string | undefined, preferredId?: string | null): string | null => {
-      if (!preferredId) return getActiveApiKey(dbString)
+    const resolveApiKey = (dbString: string | undefined, provider?: 'openrouter'|'dashscope', preferredId?: string | null): string | null => {
+      if (!preferredId) return getActiveApiKey(dbString, provider)
       const keys = parseApiKeys(dbString)
-      return keys.find(k => k.id === preferredId)?.key || getActiveApiKey(dbString)
+      const filteredKeys = provider ? keys.filter(k => k.provider === provider || (!k.provider && provider === 'openrouter')) : keys
+      return filteredKeys.find(k => k.id === preferredId)?.key || getActiveApiKey(dbString, provider)
     }
 
     let generatedJsonString = ''
 
     const baseModel = selectedModelOverride || settings.active_model || 'gemini-2.5-flash'
     const useOpenRouter = baseModel === 'openrouter'
+    const useDashScope = baseModel === 'qwen3.5-flash'
 
     // Helper to call the AI once and return the raw JSON string
     const callAi = async (): Promise<string> => {
       if (useOpenRouter) {
-        const orKey = resolveApiKey(settings.openrouter_api_key, selectedApiKeyId)
+        const orKey = resolveApiKey(settings.openrouter_api_key, 'openrouter', selectedApiKeyId)
         if (!orKey || !settings.openrouter_model_string) throw new Error('OpenRouter Model String or API Key is missing in settings.')
         const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
@@ -167,6 +179,12 @@ ${penjelasanGambar ? `Penjelasan Gambar: ${penjelasanGambar}\n` : ''}${highlight
                      arr.push({ type: 'text', text: "\nREFERENSI WAJAH & NAMA HERO MOBILE LEGENDS (GUNAKAN INI UNTUK MENEBAK HERO DI SCREENSHOT):\n" })
                      arr.push({ type: 'image_url', image_url: { url: `data:image/png;base64,${base64HeroList}` } })
                   }
+                  if (dynamicImagesBase64.length > 0) {
+                     dynamicImagesBase64.forEach((dimg, idx) => {
+                         arr.push({ type: 'text', text: `\nGAMBAR TAMBAHAN ${idx+1} (DARI MULTIPLE UPLOAD):\n` })
+                         arr.push({ type: 'image_url', image_url: { url: `data:${dimg.mime};base64,${dimg.data}` } })
+                     })
+                  }
                   return arr
                 })()
               }
@@ -177,8 +195,53 @@ ${penjelasanGambar ? `Penjelasan Gambar: ${penjelasanGambar}\n` : ''}${highlight
         if (!orRes.ok) throw new Error(`OpenRouter error: ${await orRes.text()}`)
         const orJson = await orRes.json()
         return orJson.choices[0].message.content
+      } else if (useDashScope) {
+        const dsKey = resolveApiKey(settings.openrouter_api_key, 'dashscope', selectedApiKeyId)
+        if (!dsKey) throw new Error('DashScope API Key is missing in settings.')
+        const dsRes = await fetch('https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${dsKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'qwen3.5-flash',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { 
+                role: 'user', 
+                content: (() => {
+                  const arr: any[] = [
+                    { type: 'text', text: userPromptText },
+                    { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } }
+                  ]
+                  if (base64ExtraImage) {
+                     arr.push({ type: 'text', text: "\nGAMBAR KEDUA (KLASEMEN/TAMBAHAN):\n" })
+                     arr.push({ type: 'image_url', image_url: { url: `data:${extraMimeType};base64,${base64ExtraImage}` } })
+                  }
+                  if (base64H2HImage) {
+                     arr.push({ type: 'text', text: "\nGAMBAR KETIGA (STATISTIK HEAD TO HEAD):\n" })
+                     arr.push({ type: 'image_url', image_url: { url: `data:${h2hMimeType};base64,${base64H2HImage}` } })
+                  }
+                  if (base64HeroList) {
+                     arr.push({ type: 'text', text: "\nREFERENSI WAJAH & NAMA HERO MOBILE LEGENDS (GUNAKAN INI UNTUK MENEBAK HERO DI SCREENSHOT):\n" })
+                     arr.push({ type: 'image_url', image_url: { url: `data:image/png;base64,${base64HeroList}` } })
+                  }
+                  if (dynamicImagesBase64.length > 0) {
+                     dynamicImagesBase64.forEach((dimg, idx) => {
+                         arr.push({ type: 'text', text: `\nGAMBAR TAMBAHAN ${idx+1} (DARI MULTIPLE UPLOAD):\n` })
+                         arr.push({ type: 'image_url', image_url: { url: `data:${dimg.mime};base64,${dimg.data}` } })
+                     })
+                  }
+                  return arr
+                })()
+              }
+            ],
+            response_format: { type: 'json_object' }
+          })
+        })
+        if (!dsRes.ok) throw new Error(`DashScope error: ${await dsRes.text()}`)
+        const dsJson = await dsRes.json()
+        return dsJson.choices[0].message.content
       } else {
-        const apiKey = resolveApiKey(settings.gemini_api_key, selectedApiKeyId)
+        const apiKey = resolveApiKey(settings.gemini_api_key, undefined, selectedApiKeyId)
         if (!apiKey) throw new Error('Gemini API Key missing in settings.')
         const model = baseModel === 'gemini-3.0' ? 'gemini-3.0-flash' : baseModel
         const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
@@ -203,6 +266,12 @@ ${penjelasanGambar ? `Penjelasan Gambar: ${penjelasanGambar}\n` : ''}${highlight
                   if (base64HeroList) {
                      arr.push({ text: "\nREFERENSI WAJAH & NAMA HERO MOBILE LEGENDS (GUNAKAN INI UNTUK MENEBAK HERO DI SCREENSHOT):\n" })
                      arr.push({ inlineData: { mimeType: 'image/png', data: base64HeroList } })
+                  }
+                  if (dynamicImagesBase64.length > 0) {
+                     dynamicImagesBase64.forEach((dimg, idx) => {
+                         arr.push({ text: `\nGAMBAR TAMBAHAN ${idx+1} (DARI MULTIPLE UPLOAD):\n` })
+                         arr.push({ inlineData: { mimeType: dimg.mime, data: dimg.data } })
+                     })
                   }
                   return arr
               })()
@@ -373,7 +442,7 @@ ${penjelasanGambar ? `Penjelasan Gambar: ${penjelasanGambar}\n` : ''}${highlight
       }
     }
 
-    aiOutput.content_raw_html = processedHtml
+    aiOutput.content_raw_html = convertToGutenberg(processedHtml)
     aiOutput.selected_tags = verified_tags // Re-map to expected UI param
 
     return { data: aiOutput }

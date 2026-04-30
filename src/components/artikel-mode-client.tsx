@@ -7,17 +7,17 @@ import { getWpCategoriesAction, getWpSiteOptionsAction, getApiKeyOptionsAction }
 import { ImageCropper } from '@/components/image-cropper'
 import { ArticleHtmlEditor } from '@/components/rich-text-editor'
 import { toast } from 'sonner'
-import { Loader2, Image as ImageIcon, Send, Sparkles, Trash2, X, FileImage } from 'lucide-react'
+import { Loader2, Image as ImageIcon, Send, Sparkles, Trash2, X, FileImage, Plus } from 'lucide-react'
 
 const MODES = [
   'Hasil Pertandingan (Sepak Bola)',
   'Hasil Sementara (Sepak Bola)',
   'Klasemen',
   'Top Skor Terbaru',
-  'Penilaian Pemain (Rating/Statistik)',
   'Bagan Turnamen (Bracket)',
   'Hasil Laga Esports (Mobile Legends)',
-  'Jadwal'
+  'Jadwal',
+  'Artikel Lain'
 ]
 
 export function ArtikelModeClient() {
@@ -31,7 +31,7 @@ export function ArtikelModeClient() {
   // Site / API key selector
   const [wpSites, setWpSites] = useState<{id: string, label: string, is_active: boolean}[]>([])
   const [selectedWpSiteId, setSelectedWpSiteId] = useState<string>('')
-  const [apiKeyOptions, setApiKeyOptions] = useState<{id: string, label: string, type: string}[]>([])
+  const [apiKeyOptions, setApiKeyOptions] = useState<{id: string, label: string, type: string, is_active?: boolean}[]>([])
   const [selectedApiKeyId, setSelectedApiKeyId] = useState<string>('')
   const [activeModel, setActiveModel] = useState<string>('')
   const [selectedModelOverride, setSelectedModelOverride] = useState<string>('')
@@ -46,7 +46,9 @@ export function ArtikelModeClient() {
   const [extraImageData, setExtraImageData] = useState<File | null>(null)
   const [headToHeadImageData, setHeadToHeadImageData] = useState<File | null>(null)
   const [isHoveringHeadToHeadData, setIsHoveringHeadToHeadData] = useState(false)
-  const [penjelasanGambar, setPenjelasanGambar] = useState('')  
+  const [penjelasanGambar, setPenjelasanGambar] = useState('')
+  const [dynamicImages, setDynamicImages] = useState<File[]>([])
+  const [isHoveringDynamicAdd, setIsHoveringDynamicAdd] = useState(false)
   const [uncroppedFile, setUncroppedFile] = useState<File | null>(null)
   const [thumbnail, setThumbnail] = useState<File | null>(null)
   const [previewMode, setPreviewMode] = useState<'preview' | 'html'>('preview')
@@ -80,6 +82,7 @@ export function ArtikelModeClient() {
     setImageData(null)
     setExtraImageData(null)
     setHeadToHeadImageData(null)
+    setDynamicImages([])
     setThumbnail(null)
     setSumberGambarType('Instagram'); setSumberGambarUrl('Foto: instagram.com/');
     localStorage.removeItem('ai_wp_artikel_draft');
@@ -174,11 +177,23 @@ export function ArtikelModeClient() {
               break
            }
         }
+      } else if (isHoveringDynamicAdd && e.clipboardData) {
+        const items = e.clipboardData.items
+        for (let i = 0; i < items.length; i++) {
+           if (items[i].type.indexOf('image') !== -1) {
+              const file = items[i].getAsFile()
+              if (file) {
+                 setDynamicImages(prev => [...prev, file])
+                 e.preventDefault()
+              }
+              break
+           }
+        }
       }
     }
     document.addEventListener('paste', handleGlobalPaste)
     return () => document.removeEventListener('paste', handleGlobalPaste)
-  }, [isHoveringImageData, isHoveringThumbnail, isHoveringExtraImageData, isHoveringHeadToHeadData])
+  }, [isHoveringImageData, isHoveringThumbnail, isHoveringExtraImageData, isHoveringHeadToHeadData, isHoveringDynamicAdd])
 
   // Right form state (Outputs)
   const [generatedTitles, setGeneratedTitles] = useState<string[]>([])
@@ -203,15 +218,18 @@ export function ArtikelModeClient() {
       if (keysRes.data) {
         const allKeys = [
           ...keysRes.data.gemini.map(k => ({ ...k, type: 'gemini' })),
-          ...keysRes.data.openrouter.map(k => ({ ...k, type: 'openrouter' }))
+          ...keysRes.data.openrouter.map(k => ({ ...k, type: 'openrouter' })),
+          ...(keysRes.data.dashscope || []).map(k => ({ ...k, type: 'dashscope' }))
         ]
         setApiKeyOptions(allKeys)
         const activeModel = keysRes.data.active_model
         setActiveModel(activeModel)
-        // Pre-select active key matching the active model type
-        const activeKey = activeModel === 'openrouter'
-          ? keysRes.data.openrouter.find(k => k.is_active) || keysRes.data.openrouter[0]
-          : keysRes.data.gemini.find(k => k.is_active) || keysRes.data.gemini[0]
+        
+        let reqType = 'gemini'
+        if (activeModel === 'openrouter') reqType = 'openrouter'
+        if (activeModel === 'qwen3.5-flash') reqType = 'dashscope'
+
+        const activeKey = allKeys.find(k => k.type === reqType && k.is_active) || allKeys.find(k => k.type === reqType)
         if (activeKey) setSelectedApiKeyId(activeKey.id)
       }
       if (catsRes.data) {
@@ -248,6 +266,7 @@ export function ArtikelModeClient() {
       formData.append('imageData', imageData)
       if (extraImageData) formData.append('extraImageData', extraImageData)
       if (headToHeadImageData) formData.append('headToHeadImageData', headToHeadImageData)
+      dynamicImages.forEach(img => formData.append('dynamicImages', img))
       formData.append('modeArtikel', modeArtikel)
       formData.append('sumberGambarUrl', sumberGambarUrl)
       if (highlights) formData.append('highlights', highlights)
@@ -446,6 +465,66 @@ export function ArtikelModeClient() {
             </div>
           )}
 
+          {modeArtikel === 'Artikel Lain' && imageData && (
+            <div className="space-y-4 bg-purple-50/30 p-4 rounded-xl border border-purple-100">
+               <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-purple-800">Gambar Data Tambahan</label>
+                  <span className="text-[10px] text-purple-500">{dynamicImages.length} gambar tambahan</span>
+               </div>
+
+               {dynamicImages.map((img, idx) => (
+                  <div key={idx} className="relative mt-2 flex justify-center rounded-lg border-2 border-dashed border-purple-300 px-6 py-4 bg-white min-h-[120px] items-center">
+                     <div className="text-center w-full">
+                        <img src={URL.createObjectURL(img)} alt={`Gambar ${idx + 2}`} className="mx-auto h-32 w-auto object-contain rounded-md mb-2 border border-gray-200 shadow-sm" />
+                        <p className="text-xs font-medium text-gray-700 truncate max-w-[200px] mx-auto">Gambar Data {idx + 2}</p>
+                     </div>
+                     <button
+                       type="button"
+                       onClick={() => setDynamicImages(prev => prev.filter((_, i) => i !== idx))}
+                       className="absolute top-2 right-2 p-1 rounded-full bg-red-100 hover:bg-red-200 text-red-600 transition-colors"
+                       title="Hapus gambar ini"
+                     >
+                       <X className="w-4 h-4" />
+                     </button>
+                  </div>
+               ))}
+
+               <div
+                  className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-lg border-2 border-dashed border-purple-300 hover:border-purple-500 hover:bg-purple-50 cursor-pointer transition-all text-sm font-medium text-purple-700 relative min-h-[60px]"
+                  onMouseEnter={() => setIsHoveringDynamicAdd(true)}
+                  onMouseLeave={() => setIsHoveringDynamicAdd(false)}
+                  tabIndex={0}
+               >
+                  <Plus className="w-4 h-4" />
+                  <span>Tambah Gambar Data (Klik atau Paste)</span>
+                  <input
+                    type="file"
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    accept="image/*"
+                    onChange={e => {
+                      const file = e.target.files?.[0]
+                      if (file) {
+                        setDynamicImages(prev => [...prev, file])
+                        e.target.value = ''
+                      }
+                    }}
+                  />
+               </div>
+
+               <div>
+                 <label className="text-sm font-medium text-purple-800 block">
+                    Penjelasan Gambar
+                    <span className="text-xs text-purple-500 font-normal ml-1">(Opsional)</span>
+                 </label>
+                 <textarea 
+                   value={penjelasanGambar} onChange={e => setPenjelasanGambar(e.target.value)} 
+                   className="input-field mt-1 min-h-[60px] text-sm bg-white" 
+                   placeholder="Beri arahan tambahan pada AI tentang gambar ini..."
+                 />
+               </div>
+            </div>
+          )}
+
           {modeArtikel === 'Jadwal' && (
             <div className="space-y-4 bg-orange-50/30 p-4 rounded-xl border border-orange-100">
                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -607,7 +686,7 @@ export function ArtikelModeClient() {
             <label className="text-sm font-medium text-gray-700 mb-2 block">Reference Judul</label>
             {generatedTitles.length > 0 ? (
               <div className="space-y-4">
-                <div className="space-y-2 bg-gray-50 p-2 rounded-lg border border-gray-200 h-40 overflow-y-auto">
+                <div className="space-y-2 bg-gray-50 p-2 rounded-lg border border-gray-200">
                   {generatedTitles.map((title, idx) => (
                     <label key={idx} className="flex items-start gap-3 p-2 rounded hover:bg-gray-100 cursor-pointer transition-colors bg-white border border-gray-200">
                       <input 
@@ -623,7 +702,10 @@ export function ArtikelModeClient() {
                   ))}
                 </div>
                 <div>
-                   <label className="text-xs font-semibold text-emerald-700 mb-1 block flex items-center gap-1">Judul Final (Bisa Diedit):</label>
+                   <div className="flex justify-between items-end mb-1">
+                     <label className="text-xs font-semibold text-emerald-700 block flex items-center gap-1">Judul Final (Bisa Diedit):</label>
+                     <span className="text-xs text-emerald-600/80 font-medium">{selectedTitle.trim() ? selectedTitle.trim().split(/\s+/).length : 0} kata</span>
+                   </div>
                    <input 
                      value={selectedTitle} onChange={e => setSelectedTitle(e.target.value)} 
                      className="input-field border-emerald-300 focus:ring-emerald-500 bg-emerald-50/30 font-medium text-emerald-900" 
@@ -714,9 +796,11 @@ export function ArtikelModeClient() {
                  onChange={e => {
                    const newVal = e.target.value;
                    setSelectedModelOverride(newVal);
-                   const isOr = newVal === 'openrouter' || (!newVal && activeModel === 'openrouter');
-                   const reqType = isOr ? 'openrouter' : 'gemini';
-                   const firstKey = apiKeyOptions.find(k => k.type === reqType);
+                   const effectiveModel = newVal || activeModel;
+                   let reqType = 'gemini';
+                   if (effectiveModel === 'openrouter') reqType = 'openrouter';
+                   if (effectiveModel === 'qwen3.5-flash') reqType = 'dashscope';
+                   const firstKey = apiKeyOptions.find(k => k.type === reqType && k.is_active) || apiKeyOptions.find(k => k.type === reqType);
                    if (firstKey) setSelectedApiKeyId(firstKey.id);
                  }}
               >
@@ -725,15 +809,18 @@ export function ArtikelModeClient() {
                  <option value="gemini-3-flash-preview">Gemini 3 Flash Preview</option>
                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                  <option value="openrouter">OpenRouter (Sesuai Settings)</option>
+                 <option value="qwen3.5-flash">Alibaba Qwen 3.5 Flash</option>
               </select>
             </div>
 
             <div>
               <label className="text-xs font-medium text-gray-600 mb-1 block">API Key</label>
               {(() => {
-                const reqType = selectedModelOverride 
-                                  ? (selectedModelOverride === 'openrouter' ? 'openrouter' : 'gemini') 
-                                  : (activeModel === 'openrouter' ? 'openrouter' : 'gemini')
+                const effectiveModel = selectedModelOverride || activeModel;
+                let reqType = 'gemini';
+                if (effectiveModel === 'openrouter') reqType = 'openrouter';
+                if (effectiveModel === 'qwen3.5-flash') reqType = 'dashscope';
+
                 const filteredKeys = apiKeyOptions.filter(k => k.type === reqType)
                 return filteredKeys.length === 0 ? (
                   <div className="text-xs text-gray-400 italic">Belum ada API key terkonfigurasi</div>
@@ -744,7 +831,7 @@ export function ArtikelModeClient() {
                     onChange={e => setSelectedApiKeyId(e.target.value)}
                   >
                     {filteredKeys.map(k => (
-                      <option key={k.id} value={k.id}>[{k.type === 'gemini' ? 'Gemini' : 'OpenRouter'}] {k.label}</option>
+                      <option key={k.id} value={k.id}>[{k.type === 'gemini' ? 'Gemini' : k.type === 'openrouter' ? 'OpenRouter' : 'DashScope'}] {k.label}</option>
                     ))}
                   </select>
                 )

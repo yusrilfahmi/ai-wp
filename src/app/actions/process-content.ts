@@ -4,6 +4,7 @@ import * as cheerio from 'cheerio'
 
 import { getSettings } from '@/app/actions/settings'
 import { getActiveApiKey, getActiveWpSite, parseApiKeys, parseWpSites } from '@/lib/settings-parser'
+import { convertToGutenberg } from '@/lib/gutenberg-converter'
 
 function escapeRegExp(string: string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // $& means the whole matched string
@@ -148,12 +149,13 @@ export async function processContentAction(data: {
     // Phase 1 (REMOVED: Pre-fetching massive tags array is inefficient).
     
     // Phase 2: AI Content Generation & Keyword Extraction
-    const basePersona = `You are an expert sports and news journalist (e.g., covering FC Barcelona, Real Madrid, MotoGP, F1). Write a comprehensive, engaging article based on the provided title, source links, and highlights.`
+    const basePersona = `You are an expert sports and news journalist. Write a comprehensive, engaging article in Bahasa Indonesia based on the provided title, source links, and highlights. SELURUH OUTPUT WAJIB DALAM BAHASA INDONESIA. Jangan gunakan bahasa lain selain Bahasa Indonesia.`
     const injectedCustomPrompt = settings.custom_prompt ? `\nUSER SPECIFIC INSTRUCTIONS: ${settings.custom_prompt}\n` : ''
     const systemPrompt = `${basePersona}${injectedCustomPrompt}
 CRITICAL RULES FOR CONTENT & KEYWORDS:
 1. KEYWORDS: Extract up to 5 highly specific, core entities (e.g., Player Names, Team Names, Concepts) from the article. Output purely as an array of strings. Do not infer distant relationships.
 2. 10 TITLES (REPRESENTATIVE & SPOK): The provided 'Fix Judul' is ONLY A REFERENCE. You MUST generate EXACTLY 10 new, factual titles.
+   - BATAS MAKSIMAL: Setiap judul MAKSIMAL 14 KATA. Jika lebih dari 14 kata, padatkan.
    - PUEBI/EYD TITLE CASE: Semua kata hubung dan kata depan (dan, di, ke, dari, yang, untuk, pada, dalam, dengan) WAJIB ditulis secara huruf kecil di judul!
    - GAYA BAHASA JURNALISTIK: Gunakan diksi berita yang luwes dan "punchy". Hindari bahasa formal yang terlalu kaku. Gunakan pemendekan kata (contoh: "mengincar" -> "incar", "tidak akan" -> "tak akan", "membawa" -> "bawa").
    - Strictly follow the SPOK (Subjek, Predikat, Objek, Keterangan) structure accurately without sensational clickbait.
@@ -182,21 +184,23 @@ ${data.highlights ? `\n===================================\nINSTRUKSI MUTLAK (HI
 ${data.rawScrapedText || '[No source content provided — write based on the title and highlights only]'}`
 
     // Resolve which API key to use (override or global active)
-    const resolveApiKey = (dbString: string | undefined, preferredId?: string): string | null => {
-      if (!preferredId) return getActiveApiKey(dbString)
+    const resolveApiKey = (dbString: string | undefined, provider?: 'openrouter'|'dashscope', preferredId?: string): string | null => {
+      if (!preferredId) return getActiveApiKey(dbString, provider)
       const keys = parseApiKeys(dbString)
-      return keys.find(k => k.id === preferredId)?.key || getActiveApiKey(dbString)
+      const filteredKeys = provider ? keys.filter(k => k.provider === provider || (!k.provider && provider === 'openrouter')) : keys
+      return filteredKeys.find(k => k.id === preferredId)?.key || getActiveApiKey(dbString, provider)
     }
 
     let generatedJsonString = ''
 
     const baseModel = data.selectedModelOverride || settings.active_model || 'gemini-2.5-flash'
     const useOpenRouter = baseModel === 'openrouter'
+    const useDashScope = baseModel === 'qwen3.5-flash'
 
     // Helper to call the AI once and return the raw JSON string
     const callAi = async (): Promise<string> => {
       if (useOpenRouter) {
-        const orKey = resolveApiKey(settings.openrouter_api_key, data.selectedApiKeyId)
+        const orKey = resolveApiKey(settings.openrouter_api_key, 'openrouter', data.selectedApiKeyId)
         if (!orKey || !settings.openrouter_model_string) throw new Error('OpenRouter Model String or API Key is missing in settings.')
         const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
@@ -213,8 +217,26 @@ ${data.rawScrapedText || '[No source content provided — write based on the tit
         if (!orRes.ok) throw new Error(`OpenRouter error: ${await orRes.text()}`)
         const orJson = await orRes.json()
         return orJson.choices[0].message.content
+      } else if (useDashScope) {
+        const dsKey = resolveApiKey(settings.openrouter_api_key, 'dashscope', data.selectedApiKeyId)
+        if (!dsKey) throw new Error('DashScope API Key is missing in settings.')
+        const dsRes = await fetch('https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${dsKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'qwen3.5-flash',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            response_format: { type: 'json_object' }
+          })
+        })
+        if (!dsRes.ok) throw new Error(`DashScope error: ${await dsRes.text()}`)
+        const dsJson = await dsRes.json()
+        return dsJson.choices[0].message.content
       } else {
-        const apiKey = resolveApiKey(settings.gemini_api_key, data.selectedApiKeyId)
+        const apiKey = resolveApiKey(settings.gemini_api_key, undefined, data.selectedApiKeyId)
         if (!apiKey) throw new Error('Gemini API Key missing in settings.')
         const model = baseModel === 'gemini-3.0' ? 'gemini-3.0-flash' : baseModel
         const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
@@ -388,7 +410,7 @@ ${data.rawScrapedText || '[No source content provided — write based on the tit
       }
     }
 
-    aiOutput.content_raw_html = processedHtml
+    aiOutput.content_raw_html = convertToGutenberg(processedHtml)
     aiOutput.selected_tags = verified_tags // Re-map to expected UI param
 
     return { data: aiOutput }

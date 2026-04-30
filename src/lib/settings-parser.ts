@@ -3,6 +3,7 @@ export type ApiKeyItem = {
   label: string
   key: string
   is_active: boolean
+  provider?: 'openrouter' | 'dashscope'
 }
 
 export type WpSiteItem = {
@@ -31,12 +32,13 @@ export function parseApiKeys(dbString: string | undefined): ApiKeyItem[] {
 }
 
 /**
- * Returns the currently active API key string
+ * Returns the currently active API key string, optionally filtered by provider
  */
-export function getActiveApiKey(dbString: string | undefined): string | null {
+export function getActiveApiKey(dbString: string | undefined, provider?: 'openrouter' | 'dashscope'): string | null {
   const keys = parseApiKeys(dbString)
-  const active = keys.find(k => k.is_active)
-  return active ? active.key : (keys[0]?.key || null)
+  const filteredKeys = provider ? keys.filter(k => k.provider === provider || (!k.provider && provider === 'openrouter')) : keys
+  const active = filteredKeys.find(k => k.is_active)
+  return active ? active.key : (filteredKeys[0]?.key || null)
 }
 
 /**

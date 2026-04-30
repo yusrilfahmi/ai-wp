@@ -22,7 +22,7 @@ export function DashboardClient() {
   // Site / API key selector
   const [wpSites, setWpSites] = useState<{id: string, label: string, is_active: boolean}[]>([])
   const [selectedWpSiteId, setSelectedWpSiteId] = useState<string>('')
-  const [apiKeyOptions, setApiKeyOptions] = useState<{id: string, label: string, type: string}[]>([])
+  const [apiKeyOptions, setApiKeyOptions] = useState<{id: string, label: string, type: string, is_active?: boolean}[]>([])
   const [selectedApiKeyId, setSelectedApiKeyId] = useState<string>('')
   const [activeModel, setActiveModel] = useState<string>('')
   const [selectedModelOverride, setSelectedModelOverride] = useState<string>('')
@@ -142,15 +142,18 @@ export function DashboardClient() {
       if (keysRes.data) {
         const allKeys = [
           ...keysRes.data.gemini.map(k => ({ ...k, type: 'gemini' })),
-          ...keysRes.data.openrouter.map(k => ({ ...k, type: 'openrouter' }))
+          ...keysRes.data.openrouter.map(k => ({ ...k, type: 'openrouter' })),
+          ...(keysRes.data.dashscope || []).map(k => ({ ...k, type: 'dashscope' }))
         ]
         setApiKeyOptions(allKeys)
         const activeModel = keysRes.data.active_model
         setActiveModel(activeModel)
         // Pre-select active key matching the active model type
-        const activeKey = activeModel === 'openrouter'
-          ? keysRes.data.openrouter.find(k => k.is_active) || keysRes.data.openrouter[0]
-          : keysRes.data.gemini.find(k => k.is_active) || keysRes.data.gemini[0]
+        let reqType = 'gemini'
+        if (activeModel === 'openrouter') reqType = 'openrouter'
+        if (activeModel === 'qwen3.5-flash') reqType = 'dashscope'
+
+        const activeKey = allKeys.find(k => k.type === reqType && k.is_active) || allKeys.find(k => k.type === reqType)
         if (activeKey) setSelectedApiKeyId(activeKey.id)
       }
       if (catsRes.data) {
@@ -322,7 +325,10 @@ export function DashboardClient() {
           
 
           <div>
-            <label className="text-sm font-medium text-gray-700">Fix Judul</label>
+            <div className="flex justify-between items-end">
+              <label className="text-sm font-medium text-gray-700">Fix Judul</label>
+              <span className="text-xs text-gray-500 font-medium">{fixJudul.trim() ? fixJudul.trim().split(/\s+/).length : 0} kata</span>
+            </div>
             <input 
               value={fixJudul} onChange={e => setFixJudul(e.target.value)} 
               className="input-field mt-1" placeholder="Judul artikel utama" 
@@ -527,7 +533,7 @@ export function DashboardClient() {
             <label className="text-sm font-medium text-gray-700 mb-2 block">Reference Judul</label>
             {generatedTitles.length > 0 ? (
               <div className="space-y-4">
-                <div className="space-y-2 bg-gray-50 p-2 rounded-lg border border-gray-200 h-40 overflow-y-auto">
+                <div className="space-y-2 bg-gray-50 p-2 rounded-lg border border-gray-200">
                   {generatedTitles.map((title, idx) => (
                     <label key={idx} className="flex items-start gap-3 p-2 rounded hover:bg-gray-100 cursor-pointer transition-colors bg-white border border-gray-200">
                       <input 
@@ -543,7 +549,10 @@ export function DashboardClient() {
                   ))}
                 </div>
                 <div>
-                   <label className="text-xs font-semibold text-emerald-700 mb-1 block flex items-center gap-1">Judul Final (Bisa Diedit):</label>
+                   <div className="flex justify-between items-end mb-1">
+                     <label className="text-xs font-semibold text-emerald-700 block flex items-center gap-1">Judul Final (Bisa Diedit):</label>
+                     <span className="text-xs text-emerald-600/80 font-medium">{selectedTitle.trim() ? selectedTitle.trim().split(/\s+/).length : 0} kata</span>
+                   </div>
                    <input 
                      value={selectedTitle} onChange={e => setSelectedTitle(e.target.value)} 
                      className="input-field border-emerald-300 focus:ring-emerald-500 bg-emerald-50/30 font-medium text-emerald-900" 
@@ -636,9 +645,11 @@ export function DashboardClient() {
                  onChange={e => {
                    const newVal = e.target.value;
                    setSelectedModelOverride(newVal);
-                   const isOr = newVal === 'openrouter' || (!newVal && activeModel === 'openrouter');
-                   const reqType = isOr ? 'openrouter' : 'gemini';
-                   const firstKey = apiKeyOptions.find(k => k.type === reqType);
+                   const effectiveModel = newVal || activeModel;
+                   let reqType = 'gemini';
+                   if (effectiveModel === 'openrouter') reqType = 'openrouter';
+                   if (effectiveModel === 'qwen3.5-flash') reqType = 'dashscope';
+                   const firstKey = apiKeyOptions.find(k => k.type === reqType && k.is_active) || apiKeyOptions.find(k => k.type === reqType);
                    if (firstKey) setSelectedApiKeyId(firstKey.id);
                  }}
               >
@@ -647,6 +658,7 @@ export function DashboardClient() {
                  <option value="gemini-3-flash-preview">Gemini 3 Flash Preview</option>
                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                  <option value="openrouter">OpenRouter (Sesuai Settings)</option>
+                 <option value="qwen3.5-flash">Alibaba Qwen 3.5 Flash</option>
               </select>
             </div>
 
@@ -654,9 +666,11 @@ export function DashboardClient() {
             <div>
               <label className="text-xs font-medium text-gray-600 mb-1 block">API Key</label>
               {(() => {
-                const reqType = selectedModelOverride 
-                                  ? (selectedModelOverride === 'openrouter' ? 'openrouter' : 'gemini') 
-                                  : (activeModel === 'openrouter' ? 'openrouter' : 'gemini')
+                const effectiveModel = selectedModelOverride || activeModel;
+                let reqType = 'gemini';
+                if (effectiveModel === 'openrouter') reqType = 'openrouter';
+                if (effectiveModel === 'qwen3.5-flash') reqType = 'dashscope';
+
                 const filteredKeys = apiKeyOptions.filter(k => k.type === reqType)
                 return filteredKeys.length === 0 ? (
                   <div className="text-xs text-gray-400 italic">Belum ada API key terkonfigurasi</div>
@@ -667,7 +681,7 @@ export function DashboardClient() {
                     onChange={e => setSelectedApiKeyId(e.target.value)}
                   >
                     {filteredKeys.map(k => (
-                      <option key={k.id} value={k.id}>[{k.type === 'gemini' ? 'Gemini' : 'OpenRouter'}] {k.label}</option>
+                      <option key={k.id} value={k.id}>[{k.type === 'gemini' ? 'Gemini' : k.type === 'openrouter' ? 'OpenRouter' : 'DashScope'}] {k.label}</option>
                     ))}
                   </select>
                 )
