@@ -4,8 +4,9 @@ import { useState, useTransition } from 'react'
 import { UserSettings } from '@/types'
 import { saveSettings } from '@/app/actions/settings'
 import { toast } from 'sonner'
-import { Save, KeyRound, Globe, ChevronDown, Plus, Trash2 } from 'lucide-react'
+import { Save, KeyRound, Globe, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { ApiKeyItem, WpSiteItem, parseApiKeys, parseWpSites } from '@/lib/settings-parser'
+import { ArticleHtmlEditor } from './rich-text-editor'
 
 export function SettingsForm({ initialData }: { initialData?: UserSettings | null }) {
   const [isPending, startTransition] = useTransition()
@@ -19,6 +20,10 @@ export function SettingsForm({ initialData }: { initialData?: UserSettings | nul
   const [openRouterKeys, setOpenRouterKeys] = useState<ApiKeyItem[]>(() => allOtherKeys.filter(k => k.provider === 'openrouter' || !k.provider))
   const [dashScopeKeys, setDashScopeKeys] = useState<ApiKeyItem[]>(() => allOtherKeys.filter(k => k.provider === 'dashscope'))
   const [wpSites, setWpSites] = useState<WpSiteItem[]>(() => parseWpSites(initialData?.wp_site_url, initialData?.wp_username, initialData?.wp_app_password))
+
+  const [showGemini, setShowGemini] = useState(false)
+  const [showOpenRouter, setShowOpenRouter] = useState(false)
+  const [showDashScope, setShowDashScope] = useState(false)
 
   const handleSetGeminiActive = (id: string) => {
     setGeminiKeys(prev => prev.map(k => ({ ...k, is_active: k.id === id })))
@@ -111,12 +116,13 @@ export function SettingsForm({ initialData }: { initialData?: UserSettings | nul
         </div>
         
         <div className="pt-4 border-t border-gray-200 mt-4">
-          <label className="text-sm font-medium text-gray-700">System Prompt / Instruksi Utama AI</label>
-          <textarea
+          <label className="text-sm font-medium text-gray-700">Global Tag Extraction Rules (Prompt Tag)</label>
+          <p className="text-[10px] text-gray-500 mb-2">Instruksi ini akan selalu disisipkan ke semua mode untuk mengatur cara AI mengekstrak tag/keyword.</p>
+          <ArticleHtmlEditor
              value={customPrompt}
-             onChange={e => setCustomPrompt(e.target.value)}
-             placeholder="Instruksi tambahan bagi AI... Contoh: Gaya bahasa harus santai dan kekinian."
-             className="input-field mt-2 min-h-[100px] resize-y"
+             onChange={setCustomPrompt}
+             placeholder="Contoh: 1. KEYWORDS (TAG EXTRACTION): Extract up to 5 highly specific..."
+             minHeight="200px"
           />
         </div>
       </div>
@@ -130,64 +136,88 @@ export function SettingsForm({ initialData }: { initialData?: UserSettings | nul
         
         <div className="space-y-6">
           {/* Gemini List */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold text-gray-800">Gemini API Keys</label>
-              <a href="https://aistudio.google.com/app/api-keys" target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline border border-blue-100 rounded px-2 py-1 bg-blue-50">Ambil API Key</a>
-            </div>
-            {geminiKeys.map(k => (
-              <div key={k.id} className={`flex items-start gap-3 p-3 rounded-lg border \${k.is_active ? 'border-indigo-500 bg-indigo-50/30' : 'border-gray-200 bg-gray-50'}`}>
-                <input type="radio" name="active_gemini" className="mt-2.5 h-4 w-4 bg-white accent-indigo-600" checked={k.is_active} onChange={() => handleSetGeminiActive(k.id)} />
-                <div className="flex-1 space-y-2">
-                  <input type="text" placeholder="Label Akun (Opsional)" className="input-field text-sm py-1.5" value={k.label} onChange={e => setGeminiKeys(prev => prev.map(x => x.id === k.id ? { ...x, label: e.target.value } : x))} />
-                  <input type="password" placeholder="AIzaSy..." className="input-field text-sm py-1.5" value={k.key} onChange={e => setGeminiKeys(prev => prev.map(x => x.id === k.id ? { ...x, key: e.target.value } : x))} />
-                </div>
-                <button type="button" onClick={() => setGeminiKeys(prev => prev.filter(x => x.id !== k.id))} className="text-gray-400 hover:text-red-500 p-2"><Trash2 className="w-4 h-4"/></button>
+          <div className="space-y-3 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+            <div className="flex items-center justify-between cursor-pointer" onClick={() => setShowGemini(!showGemini)}>
+              <div className="flex items-center gap-2">
+                {showGemini ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+                <label className="text-sm font-semibold text-gray-800 cursor-pointer">Gemini API Keys <span className="text-gray-400 font-normal">({geminiKeys.length} akun)</span></label>
               </div>
-            ))}
-            <button type="button" onClick={() => setGeminiKeys(prev => [...prev, { id: Date.now().toString(), label: `Akun Gemini \${prev.length+1}`, key: '', is_active: prev.length === 0 }])} className="text-xs font-medium text-indigo-600 flex items-center gap-1 hover:underline"><Plus className="w-3 h-3"/> Tambah Akun Gemini</button>
+              <a href="https://aistudio.google.com/app/api-keys" target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-xs text-blue-500 hover:underline border border-blue-100 rounded px-2 py-1 bg-blue-50">Ambil API Key</a>
+            </div>
+            
+            {showGemini && (
+              <div className="space-y-3 pt-3 border-t border-gray-100">
+                {geminiKeys.map(k => (
+                  <div key={k.id} className={`flex items-start gap-3 p-3 rounded-lg border ${k.is_active ? 'border-indigo-500 bg-indigo-50/30' : 'border-gray-200 bg-gray-50'}`}>
+                    <input type="radio" name="active_gemini" className="mt-2.5 h-4 w-4 bg-white accent-indigo-600" checked={k.is_active} onChange={() => handleSetGeminiActive(k.id)} />
+                    <div className="flex-1 space-y-2">
+                      <input type="text" placeholder="Label Akun (Opsional)" className="input-field text-sm py-1.5" value={k.label} onChange={e => setGeminiKeys(prev => prev.map(x => x.id === k.id ? { ...x, label: e.target.value } : x))} />
+                      <input type="password" placeholder="AIzaSy..." className="input-field text-sm py-1.5" value={k.key} onChange={e => setGeminiKeys(prev => prev.map(x => x.id === k.id ? { ...x, key: e.target.value } : x))} />
+                    </div>
+                    <button type="button" onClick={() => setGeminiKeys(prev => prev.filter(x => x.id !== k.id))} className="text-gray-400 hover:text-red-500 p-2"><Trash2 className="w-4 h-4"/></button>
+                  </div>
+                ))}
+                <button type="button" onClick={() => setGeminiKeys(prev => [...prev, { id: Date.now().toString(), label: `Akun Gemini ${prev.length+1}`, key: '', is_active: prev.length === 0 }])} className="text-xs font-medium text-indigo-600 flex items-center gap-1 hover:underline"><Plus className="w-3 h-3"/> Tambah Akun Gemini</button>
+              </div>
+            )}
           </div>
 
           <div className="border-t border-gray-100 my-4" />
 
           {/* OpenRouter List */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold text-gray-800">OpenRouter API Keys</label>
-              <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline border border-blue-100 rounded px-2 py-1 bg-blue-50">Ambil API Key</a>
-            </div>
-            {openRouterKeys.map(k => (
-              <div key={k.id} className={`flex items-start gap-3 p-3 rounded-lg border ${k.is_active ? 'border-indigo-500 bg-indigo-50/30' : 'border-gray-200 bg-gray-50'}`}>
-                <input type="radio" name="active_openrouter" className="mt-2.5 h-4 w-4 bg-white accent-indigo-600" checked={k.is_active} onChange={() => handleSetOpenRouterActive(k.id)} />
-                <div className="flex-1 space-y-2">
-                  <input type="text" placeholder="Label Akun (Opsional)" className="input-field text-sm py-1.5" value={k.label} onChange={e => setOpenRouterKeys(prev => prev.map(x => x.id === k.id ? { ...x, label: e.target.value } : x))} />
-                  <input type="password" placeholder="sk-or-v1-..." className="input-field text-sm py-1.5" value={k.key} onChange={e => setOpenRouterKeys(prev => prev.map(x => x.id === k.id ? { ...x, key: e.target.value } : x))} />
-                </div>
-                <button type="button" onClick={() => setOpenRouterKeys(prev => prev.filter(x => x.id !== k.id))} className="text-gray-400 hover:text-red-500 p-2"><Trash2 className="w-4 h-4"/></button>
+          <div className="space-y-3 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+            <div className="flex items-center justify-between cursor-pointer" onClick={() => setShowOpenRouter(!showOpenRouter)}>
+              <div className="flex items-center gap-2">
+                {showOpenRouter ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+                <label className="text-sm font-semibold text-gray-800 cursor-pointer">OpenRouter API Keys <span className="text-gray-400 font-normal">({openRouterKeys.length} akun)</span></label>
               </div>
-            ))}
-            <button type="button" onClick={() => setOpenRouterKeys(prev => [...prev, { id: Date.now().toString(), label: `Akun OpenRouter ${prev.length+1}`, key: '', is_active: prev.length === 0, provider: 'openrouter' }])} className="text-xs font-medium text-indigo-600 flex items-center gap-1 hover:underline"><Plus className="w-3 h-3"/> Tambah Akun OpenRouter</button>
+              <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-xs text-blue-500 hover:underline border border-blue-100 rounded px-2 py-1 bg-blue-50">Ambil API Key</a>
+            </div>
+            
+            {showOpenRouter && (
+              <div className="space-y-3 pt-3 border-t border-gray-100">
+                {openRouterKeys.map(k => (
+                  <div key={k.id} className={`flex items-start gap-3 p-3 rounded-lg border ${k.is_active ? 'border-indigo-500 bg-indigo-50/30' : 'border-gray-200 bg-gray-50'}`}>
+                    <input type="radio" name="active_openrouter" className="mt-2.5 h-4 w-4 bg-white accent-indigo-600" checked={k.is_active} onChange={() => handleSetOpenRouterActive(k.id)} />
+                    <div className="flex-1 space-y-2">
+                      <input type="text" placeholder="Label Akun (Opsional)" className="input-field text-sm py-1.5" value={k.label} onChange={e => setOpenRouterKeys(prev => prev.map(x => x.id === k.id ? { ...x, label: e.target.value } : x))} />
+                      <input type="password" placeholder="sk-or-v1-..." className="input-field text-sm py-1.5" value={k.key} onChange={e => setOpenRouterKeys(prev => prev.map(x => x.id === k.id ? { ...x, key: e.target.value } : x))} />
+                    </div>
+                    <button type="button" onClick={() => setOpenRouterKeys(prev => prev.filter(x => x.id !== k.id))} className="text-gray-400 hover:text-red-500 p-2"><Trash2 className="w-4 h-4"/></button>
+                  </div>
+                ))}
+                <button type="button" onClick={() => setOpenRouterKeys(prev => [...prev, { id: Date.now().toString(), label: `Akun OpenRouter ${prev.length+1}`, key: '', is_active: prev.length === 0, provider: 'openrouter' }])} className="text-xs font-medium text-indigo-600 flex items-center gap-1 hover:underline"><Plus className="w-3 h-3"/> Tambah Akun OpenRouter</button>
+              </div>
+            )}
           </div>
 
           <div className="border-t border-gray-100 my-4" />
 
           {/* DashScope List */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold text-gray-800">Alibaba DashScope (Model Studio) API Keys</label>
-              <a href="https://modelstudio.console.alibabacloud.com/ap-southeast-1" target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline border border-blue-100 rounded px-2 py-1 bg-blue-50">API Keys</a>
-            </div>
-            {dashScopeKeys.map(k => (
-              <div key={k.id} className={`flex items-start gap-3 p-3 rounded-lg border ${k.is_active ? 'border-indigo-500 bg-indigo-50/30' : 'border-gray-200 bg-gray-50'}`}>
-                <input type="radio" name="active_dashscope" className="mt-2.5 h-4 w-4 bg-white accent-indigo-600" checked={k.is_active} onChange={() => handleSetDashScopeActive(k.id)} />
-                <div className="flex-1 space-y-2">
-                  <input type="text" placeholder="Label Akun (Opsional)" className="input-field text-sm py-1.5" value={k.label} onChange={e => setDashScopeKeys(prev => prev.map(x => x.id === k.id ? { ...x, label: e.target.value } : x))} />
-                  <input type="password" placeholder="sk-..." className="input-field text-sm py-1.5" value={k.key} onChange={e => setDashScopeKeys(prev => prev.map(x => x.id === k.id ? { ...x, key: e.target.value } : x))} />
-                </div>
-                <button type="button" onClick={() => setDashScopeKeys(prev => prev.filter(x => x.id !== k.id))} className="text-gray-400 hover:text-red-500 p-2"><Trash2 className="w-4 h-4"/></button>
+          <div className="space-y-3 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+            <div className="flex items-center justify-between cursor-pointer" onClick={() => setShowDashScope(!showDashScope)}>
+              <div className="flex items-center gap-2">
+                {showDashScope ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+                <label className="text-sm font-semibold text-gray-800 cursor-pointer">Alibaba DashScope API Keys <span className="text-gray-400 font-normal">({dashScopeKeys.length} akun)</span></label>
               </div>
-            ))}
-            <button type="button" onClick={() => setDashScopeKeys(prev => [...prev, { id: Date.now().toString(), label: `Akun DashScope ${prev.length+1}`, key: '', is_active: prev.length === 0, provider: 'dashscope' }])} className="text-xs font-medium text-indigo-600 flex items-center gap-1 hover:underline"><Plus className="w-3 h-3"/> Tambah Akun DashScope</button>
+              <a href="https://modelstudio.console.alibabacloud.com/ap-southeast-1" target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-xs text-blue-500 hover:underline border border-blue-100 rounded px-2 py-1 bg-blue-50">API Keys</a>
+            </div>
+            
+            {showDashScope && (
+              <div className="space-y-3 pt-3 border-t border-gray-100">
+                {dashScopeKeys.map(k => (
+                  <div key={k.id} className={`flex items-start gap-3 p-3 rounded-lg border ${k.is_active ? 'border-indigo-500 bg-indigo-50/30' : 'border-gray-200 bg-gray-50'}`}>
+                    <input type="radio" name="active_dashscope" className="mt-2.5 h-4 w-4 bg-white accent-indigo-600" checked={k.is_active} onChange={() => handleSetDashScopeActive(k.id)} />
+                    <div className="flex-1 space-y-2">
+                      <input type="text" placeholder="Label Akun (Opsional)" className="input-field text-sm py-1.5" value={k.label} onChange={e => setDashScopeKeys(prev => prev.map(x => x.id === k.id ? { ...x, label: e.target.value } : x))} />
+                      <input type="password" placeholder="sk-..." className="input-field text-sm py-1.5" value={k.key} onChange={e => setDashScopeKeys(prev => prev.map(x => x.id === k.id ? { ...x, key: e.target.value } : x))} />
+                    </div>
+                    <button type="button" onClick={() => setDashScopeKeys(prev => prev.filter(x => x.id !== k.id))} className="text-gray-400 hover:text-red-500 p-2"><Trash2 className="w-4 h-4"/></button>
+                  </div>
+                ))}
+                <button type="button" onClick={() => setDashScopeKeys(prev => [...prev, { id: Date.now().toString(), label: `Akun DashScope ${prev.length+1}`, key: '', is_active: prev.length === 0, provider: 'dashscope' }])} className="text-xs font-medium text-indigo-600 flex items-center gap-1 hover:underline"><Plus className="w-3 h-3"/> Tambah Akun DashScope</button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -203,7 +233,7 @@ export function SettingsForm({ initialData }: { initialData?: UserSettings | nul
           <p className="text-sm text-gray-500">Pilih situs WordPress mana yang akan digunakan server untuk injeksi Kategori, Tags, dan draf otomatis.</p>
           
           {wpSites.map(site => (
-            <div key={site.id} className={`p-4 rounded-lg border \${site.is_active ? 'border-emerald-500 bg-emerald-50/30' : 'border-gray-200 bg-gray-50'}`}>
+            <div key={site.id} className={`p-4 rounded-lg border ${site.is_active ? 'border-emerald-500 bg-emerald-50/30' : 'border-gray-200 bg-gray-50'}`}>
               <div className="flex items-center gap-3 mb-4 border-b border-gray-100 pb-2">
                 <input type="radio" name="active_wp" className="h-4 w-4 bg-white accent-emerald-600" checked={site.is_active} onChange={() => handleSetWpActive(site.id)} />
                 <input type="text" placeholder="Label Target WP (Contoh: Web Olahraga)" className="input-field font-medium bg-transparent border-none p-0 focus:ring-0 text-sm flex-1" value={site.label} onChange={e => setWpSites(prev => prev.map(x => x.id === site.id ? { ...x, label: e.target.value } : x))} />
@@ -229,7 +259,7 @@ export function SettingsForm({ initialData }: { initialData?: UserSettings | nul
             </div>
           ))}
 
-          <button type="button" onClick={() => setWpSites(prev => [...prev, { id: Date.now().toString(), label: `Target WP \${prev.length+1}`, url: '', username: '', password: '', is_active: prev.length === 0 }])} className="text-sm font-medium text-emerald-600 flex items-center gap-1 hover:underline mt-2"><Plus className="w-4 h-4"/> Tambah WordPress Site Baru</button>
+          <button type="button" onClick={() => setWpSites(prev => [...prev, { id: Date.now().toString(), label: `Target WP ${prev.length+1}`, url: '', username: '', password: '', is_active: prev.length === 0 }])} className="text-sm font-medium text-emerald-600 flex items-center gap-1 hover:underline mt-2"><Plus className="w-4 h-4"/> Tambah WordPress Site Baru</button>
         </div>
       </div>
 

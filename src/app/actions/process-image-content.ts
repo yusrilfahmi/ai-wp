@@ -29,6 +29,7 @@ export async function processImageContentAction(formData: FormData) {
     const selectedWpSiteId = formData.get('selectedWpSiteId') as string | null
     const selectedApiKeyId = formData.get('selectedApiKeyId') as string | null
     const selectedModelOverride = formData.get('selectedModelOverride') as string | null
+    const customPrompt = formData.get('customPrompt') as string | null
 
     if (!modeArtikel || !sumberGambar || !imageFile) {
       return { error: 'Mode Artikel, Sumber Gambar, dan Image Data wajib diisi' }
@@ -75,50 +76,12 @@ export async function processImageContentAction(formData: FormData) {
     }
 
     // Phase 2: Multimodal AI Content Generation (Image to JSON)
-    const basePersona = `You are an expert sports journalist writing hard news articles in formal Indonesian (Bahasa Indonesia baku). SELURUH OUTPUT WAJIB DALAM BAHASA INDONESIA. Jangan gunakan bahasa lain selain Bahasa Indonesia dalam artikel, judul, meta description, maupun tag reasoning.`
-    const injectedCustomPrompt = settings.custom_prompt ? `\nUSER SPECIFIC INSTRUCTIONS: ${settings.custom_prompt}\n` : ''
+    const basePrompt = customPrompt || `You are an expert sports journalist writing hard news articles in formal Indonesian (Bahasa Indonesia baku). SELURUH OUTPUT WAJIB DALAM BAHASA INDONESIA. Jangan gunakan bahasa lain selain Bahasa Indonesia dalam artikel, judul, meta description, maupun tag reasoning.`
 
-    const systemPrompt = `${basePersona}${injectedCustomPrompt}
-CRITICAL RULES FOR CONTENT & FORMATTING:
+    const systemPrompt = `${basePrompt}
 
-1. KEYWORDS (TAG EXTRACTION): Extract up to 5 highly specific, core entities directly present in the image data (e.g., exact Player Names, exact Team Names, Tournament Names, Competition Names). Output purely as an array of strings. Do NOT infer distant relationships or add generic sports terms. Only include what is explicitly visible or referenced.
-   - Provide a step-by-step "tag_reasoning" justification for EACH keyword you chose, citing evidence from the image data.
-
-2. MODE-SPECIFIC RULES (You are writing for mode: "${modeArtikel}"):
-   - If "hasil" or "hasil sementara": Do NOT use the word "Akhir" in titles. Use "Hasil [Tim A] vs [Tim B] [Skor]".
-   - If "rating pemain" or "penilaian pemain": Do NOT use the word "Rapor". Use "Penilaian", "Nilai", or "Evaluasi". You MUST include an HTML table (Posisi | Nama Pemain | Nilai). Tulis semua rating pemain ya, dan pisahkan satu tim satu sub bab.
-   - If "top skor" or "klasemen": You MUST include an HTML table representing the standings or top scorers based on the image. Masukkan lengkap klasemen semua tim.
-   - If "esports": Do not mention player names individually for hero drafts, just mention the team's overall hero composition.
-   - If "artikel lain": Focus entirely on fulfilling the specific instructions from the MUTLAK HIGHLIGHT section provided by the user. Maintain the same high-quality journalism style as other modes.
-
-3. PLAYER NAMES & TERMINOLOGY:
-   - NEVER abbreviate player names (e.g., "Putra B." MUST be expanded to "Beckham Putra").
-   - Translate foreign terms to standard Indonesian (e.g., injury time = masa tambahan waktu, leg = pertemuan).
-
-4. HTML ARTICLE STRUCTURE (For "content_raw_html"):
-   - The opening section before the first subheading MUST have at least 3 distinct paragraphs (<p>).
-   - Include at least 2 subheadings using <h2> tags.
-   - Under EACH <h2> subheading, write at least 3 distinct paragraphs (<p>).
-   - Include properly formatted <table> tags if required by the mode.
-   - NEVER put internal links or <a> tags inside <h2> or <h3> subheadings.
-
-5. TITLES (STRICT FEW-SHOT EXAMPLES):
-   - Generate EXACTLY 5 reference titles.
-   - BATAS MAKSIMAL: Setiap judul MAKSIMAL 14 KATA. Jika lebih dari 14 kata, padatkan agar tetap informatif.
-   - PUEBI/EYD TITLE CASE: Semua kata hubung dan kata depan (dan, di, ke, dari, yang, untuk, pada, dalam, dengan) WAJIB ditulis dengan huruf kecil di judul!
-   - GAYA BAHASA JURNALISTIK: Gunakan diksi berita gaya olahraga yang luwes dan "punchy". Hindari kata awalan formal yang kaku. Gunakan pemendekan kata dasar (contoh: "mengincar" -> "incar", "tidak akan" -> "tak akan", "membawa" -> "bawa").
-   - FORMATTING: Titles MUST use a "Two-Part Structure" separated by a colon (:). Part 1 is the Core Fact (Result/Standings/Rating). Part 2 is the Key Highlight in SPOK structure.
-   - NEVER use clickbait, question marks, or exaggerated words.
-   - YOU MUST MIMIC THESE EXACT PATTERNS BASED ON THE MODE:
-     * Mode "hasil": "Hasil Barito Putera vs Persiku Kudus 1-1: Diwarnai Kartu Merah dan Gol Bunuh Diri, Laskar Antasari Harus Rela Berbagi Poin"
-     * Mode "hasil" (with win): "Hasil Manchester City vs Real Madrid 1-2: Puncak Drama VAR dan Gol Telat Vinicius Junior Benamkan Sepuluh Pemain Tuan Rumah"
-     * Mode "hasil sementara": "Hasil Sementara Indonesia vs Saint Kitts and Nevis 2-0: Dwigol Beckham Putra Bawa Skuad Garuda Memimpin di Paruh Pertama"
-     * Mode "klasemen": "Klasemen Lengkap Championship Liga Indonesia Grup A Pekan ke-22: Gilas FC Bekasi City 4-0, Garudayaksa Terus Bayangi Adhyaksa"
-     * Mode "rating pemain": "Penilaian Pemain Chelsea vs Paris Saint-Germain: Matvei Safonov Tampil Sempurna, Lini Belakang Tuan Rumah Terpuruk"
-     * Mode "bagan turnamen": "Bagan Perempat Final Liga Champions: Singkirkan Bayer Leverkusen, Arsenal Tantang Sporting CP"
-     * Mode "jadwal": "Jadwal Pertandingan Liga Inggris: Arsenal Menantang Manchester City di Emirates Stadium. (PENTING: Di mode ini Anda membuat artikel preview/jadwal laga. Gambar pertama = Jadwal Utama, Gambar kedua = Klasemen, Gambar ketiga = Statistik Head to Head. Rangkum info penting dari ketiganya secara urut.)"
-     * Mode "esports": "Hasil Bigetron Alpha vs Alter Ego 2-1: Sengit Hingga Gim Ketiga, Skuad Robot Merah Kunci Kemenangan. (ATURAN MUTLAK HERO DRAFT: JANGAN MENGARANG BEBAS NAMA HERO! AI harus melihat 1 per 1 wajah kecil hero yang ada di screenshot laga, lalu MENCOCOKKAN SECARA VISUAL SATU PER SATU wajah/ikon tersebut ke dalam daftar wajah yang ada di gambar referensi 'hero_list_mlbb'. Hanya tulis nama hero yang fotonya 100% identik di gambar referensi. Jika tidak yakin, tulis 'beberapa hero andalan'. JANGAN menyebut hero yang wajahnya tidak ada! Jika ada gambar klasemen tambahan, bahas klasemen tersebut.)"
-     * Mode "artikel lain": Judul disesuaikan dengan fokus perintah pada instruksi MUTLAK HIGHLIGHT. Bebas namun tetap ikuti PUEBI/EYD SPOK journalism format.
+TAGGING INSTRUCTIONS:
+${settings?.custom_prompt || 'Extract up to 5 highly specific, core entities from the text/image. Output purely as an array of strings.'}
 
 Output MUST be strictly in JSON format (DO NOT wrap in markdown \`\`\`json blocks):
 {
@@ -126,7 +89,12 @@ Output MUST be strictly in JSON format (DO NOT wrap in markdown \`\`\`json block
   "meta_desc": "Write 1-2 compelling sentences summarizing the match/data for SEO.",
   "content_raw_html": "<p>...</p><h2>...</h2><p>...</p>",
   "tag_reasoning": "Explain step-by-step why you extracted each keyword.",
-  "suggested_keywords": ["Keyword 1", "Keyword 2", "Keyword 3", "Keyword 4", "Keyword 5"]
+  "suggested_keywords": [
+    {
+      "tag": "Standard Tag Name (e.g. Liga Super Indonesia)",
+      "phrases_in_article": ["Exact phrase 1 (e.g. BRI Super League)", "Exact phrase 2 (e.g. Liga 1)"]
+    }
+  ]
 }`
 
     const userPromptText = `Input Data:
@@ -313,8 +281,22 @@ ${penjelasanGambar ? `Penjelasan Gambar: ${penjelasanGambar}\n` : ''}${highlight
     if (aiOutput.suggested_keywords && Array.isArray(aiOutput.suggested_keywords) && activeWp?.url) {
       const authHeader = `Basic ${Buffer.from(`${activeWp.username}:${activeWp.password}`).toString('base64')}`
       
-      const searchPromises = aiOutput.suggested_keywords.map(async (keyword: string) => {
+      const searchPromises = aiOutput.suggested_keywords.map(async (kwItem: any) => {
         try {
+          const keyword = typeof kwItem === 'string' ? kwItem : kwItem.tag;
+          let phrasesToLink: string[] = [];
+          if (typeof kwItem === 'string') {
+            phrasesToLink = [kwItem];
+          } else if (Array.isArray(kwItem.phrases_in_article)) {
+            phrasesToLink = kwItem.phrases_in_article;
+          } else if (kwItem.phrase_in_article) {
+            phrasesToLink = [kwItem.phrase_in_article];
+          } else {
+            phrasesToLink = [keyword];
+          }
+          
+          if (!keyword) return null;
+
           const encodedKeyword = encodeURIComponent(keyword)
           const searchUrl = new URL(`/wp-json/wp/v2/tags?search=${encodedKeyword}`, activeWp.url)
           console.log(`[ArtikelMode] Searching WP for tag: ${keyword} -> ${searchUrl}`)
@@ -334,11 +316,11 @@ ${penjelasanGambar ? `Penjelasan Gambar: ${penjelasanGambar}\n` : ''}${highlight
               id: matchToUse.id,
               name: matchToUse.name,
               link: matchToUse.link,
-              matched_keyword_in_text: keyword
+              matched_keywords_in_text: phrasesToLink
             }
           }
         } catch (e) {
-          console.error(`Tag search failed for ${keyword}:`, e)
+          console.error(`Tag search failed for item:`, e)
         }
         return null
       })
@@ -354,8 +336,11 @@ ${penjelasanGambar ? `Penjelasan Gambar: ${penjelasanGambar}\n` : ''}${highlight
     if (aiOutput.suggested_keywords && Array.isArray(aiOutput.suggested_keywords) && activeWp?.url) {
       const authHeader = `Basic ${Buffer.from(`${activeWp.username}:${activeWp.password}`).toString('base64')}`
       
-      const postSearchPromises = aiOutput.suggested_keywords.slice(0, 3).map(async (keyword: string) => {
+      const postSearchPromises = aiOutput.suggested_keywords.slice(0, 3).map(async (kwItem: any) => {
         try {
+          const keyword = typeof kwItem === 'string' ? kwItem : kwItem.tag;
+          if (!keyword) return null;
+
           const encodedKeyword = encodeURIComponent(keyword)
           const searchUrl = new URL(`/wp-json/wp/v2/posts?search=${encodedKeyword}&per_page=1&_fields=id,title,link`, activeWp.url)
           const res = await fetch(searchUrl.toString(), {
@@ -371,7 +356,7 @@ ${penjelasanGambar ? `Penjelasan Gambar: ${penjelasanGambar}\n` : ''}${highlight
             }
           }
         } catch (e) {
-          console.error(`Post search failed for ${keyword}:`, e)
+          console.error(`Post search failed for keyword:`, e)
         }
         return null
       })
@@ -397,16 +382,27 @@ ${penjelasanGambar ? `Penjelasan Gambar: ${penjelasanGambar}\n` : ''}${highlight
     
     if (verified_tags.length > 0) {
       verified_tags.forEach((tag) => {
-         const keywordToSearch = tag.matched_keyword_in_text;
-         if (keywordToSearch && tag.link) {
-           try {
-             const tagRegex = new RegExp(`(?![^<]*>)(\\b${escapeRegExp(keywordToSearch)}\\b)`, 'i')
-             processedHtml = processedHtml.replace(tagRegex, `<a href="${tag.link}" title="Link Internal: ${tag.link}" target="_blank" rel="noopener">$&</a>`)
-           } catch {
-             const fallbackRegex = new RegExp(`\\b${escapeRegExp(keywordToSearch)}\\b`, 'i')
-             processedHtml = processedHtml.replace(fallbackRegex, `<a href="${tag.link}" title="Link Internal: ${tag.link}" target="_blank" rel="noopener">$&</a>`)
-           }
-         }
+         const keywordsToSearch = tag.matched_keywords_in_text || [tag.matched_keyword_in_text];
+         let linkInjectedForThisTag = false;
+         
+         keywordsToSearch.forEach((keywordToSearch: string) => {
+             if (keywordToSearch && tag.link && !linkInjectedForThisTag) {
+               try {
+                 // Gunakan regex flag 'i' TANPA 'g' agar HANYA me-replace KEMUNCULAN PERTAMA
+                 const tagRegex = new RegExp(`(?![^<]*>)(\\b${escapeRegExp(keywordToSearch)}\\b)`, 'i')
+                 if (tagRegex.test(processedHtml)) {
+                     processedHtml = processedHtml.replace(tagRegex, `<a href="${tag.link}" title="Link Internal: ${tag.link}" target="_blank" rel="noopener">$&</a>`)
+                     linkInjectedForThisTag = true;
+                 }
+               } catch {
+                 const fallbackRegex = new RegExp(`\\b${escapeRegExp(keywordToSearch)}\\b`, 'i')
+                 if (fallbackRegex.test(processedHtml)) {
+                     processedHtml = processedHtml.replace(fallbackRegex, `<a href="${tag.link}" title="Link Internal: ${tag.link}" target="_blank" rel="noopener">$&</a>`)
+                     linkInjectedForThisTag = true;
+                 }
+               }
+             }
+         });
       })
     }
 
@@ -443,7 +439,13 @@ ${penjelasanGambar ? `Penjelasan Gambar: ${penjelasanGambar}\n` : ''}${highlight
     }
 
     aiOutput.content_raw_html = convertToGutenberg(processedHtml)
-    aiOutput.selected_tags = verified_tags // Re-map to expected UI param
+
+    // Deduplicate verified tags based on ID to avoid duplicate rendering in UI
+    const uniqueTagsMap = new Map()
+    verified_tags.forEach(t => {
+       if (!uniqueTagsMap.has(t.id)) uniqueTagsMap.set(t.id, t)
+    })
+    aiOutput.selected_tags = Array.from(uniqueTagsMap.values()) // Re-map to expected UI param
 
     return { data: aiOutput }
   } catch (error) {

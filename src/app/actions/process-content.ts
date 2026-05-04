@@ -134,6 +134,7 @@ export async function processContentAction(data: {
   linkSumber: string
   sumberLain: string
   highlights: string
+  customPrompt?: string
   rawScrapedText: string
   selectedWpSiteId?: string
   selectedApiKeyId?: string
@@ -149,9 +150,8 @@ export async function processContentAction(data: {
     // Phase 1 (REMOVED: Pre-fetching massive tags array is inefficient).
     
     // Phase 2: AI Content Generation & Keyword Extraction
-    const basePersona = `You are an expert sports and news journalist. Write a comprehensive, engaging article in Bahasa Indonesia based on the provided title, source links, and highlights. SELURUH OUTPUT WAJIB DALAM BAHASA INDONESIA. Jangan gunakan bahasa lain selain Bahasa Indonesia.`
-    const injectedCustomPrompt = settings.custom_prompt ? `\nUSER SPECIFIC INSTRUCTIONS: ${settings.custom_prompt}\n` : ''
-    const systemPrompt = `${basePersona}${injectedCustomPrompt}
+    const basePrompt = data.customPrompt || `You are an expert sports and news journalist. Write a comprehensive, engaging article in Bahasa Indonesia based on the provided title, source links, and highlights. SELURUH OUTPUT WAJIB DALAM BAHASA INDONESIA. Jangan gunakan bahasa lain selain Bahasa Indonesia.
+
 CRITICAL RULES FOR CONTENT & KEYWORDS:
 1. KEYWORDS: Extract up to 5 highly specific, core entities (e.g., Player Names, Team Names, Concepts) from the article. Output purely as an array of strings. Do not infer distant relationships.
 2. 10 TITLES (REPRESENTATIVE & SPOK): The provided 'Fix Judul' is ONLY A REFERENCE. You MUST generate EXACTLY 10 new, factual titles.
@@ -165,7 +165,12 @@ CRITICAL RULES FOR CONTENT & KEYWORDS:
    - The HTML article MUST contain at least 2 subheadings (<h2> or <h3>).
    - The opening section before the first subheading MUST have at least 3 distinct paragraphs (<p>), starting with the 5W1H Lead.
    - Under EACH subheading, you MUST write at least 3 distinct paragraphs (<p>).
-   - NEVER put internal links or <a> tags inside <h2> or <h3> subheadings.
+   - NEVER put internal links or <a> tags inside <h2> or <h3> subheadings.`;
+
+    const systemPrompt = `${basePrompt}
+
+TAGGING INSTRUCTIONS:
+${settings.custom_prompt || 'Extract up to 5 highly specific, core entities from the text. Output purely as an array of strings.'}
 
 Output MUST be strictly in JSON format:
 {
@@ -173,7 +178,12 @@ Output MUST be strictly in JSON format:
   "meta_desc": "...",
   "content_raw_html": "<p>...</p>",
   "tag_reasoning": "Explain step-by-step why you extracted each keyword based strictly on the text.",
-  "suggested_keywords": ["Keyword 1", "Keyword 2"]
+  "suggested_keywords": [
+    {
+      "tag": "Standard Tag Name (e.g. Liga Super Indonesia)",
+      "phrases_in_article": ["Exact phrase 1 (e.g. BRI Super League)", "Exact phrase 2 (e.g. Liga 1)"]
+    }
+  ]
 }`
 
     const userPrompt = `Input Data:
@@ -278,8 +288,22 @@ ${data.rawScrapedText || '[No source content provided — write based on the tit
     if (aiOutput.suggested_keywords && Array.isArray(aiOutput.suggested_keywords) && activeWp?.url) {
       const authHeader = `Basic ${Buffer.from(`${activeWp.username}:${activeWp.password}`).toString('base64')}`
       
-      const searchPromises = aiOutput.suggested_keywords.map(async (keyword: string) => {
+      const searchPromises = aiOutput.suggested_keywords.map(async (kwItem: any) => {
         try {
+          const keyword = typeof kwItem === 'string' ? kwItem : kwItem.tag;
+          let phrasesToLink: string[] = [];
+          if (typeof kwItem === 'string') {
+            phrasesToLink = [kwItem];
+          } else if (Array.isArray(kwItem.phrases_in_article)) {
+            phrasesToLink = kwItem.phrases_in_article;
+          } else if (kwItem.phrase_in_article) {
+            phrasesToLink = [kwItem.phrase_in_article];
+          } else {
+            phrasesToLink = [keyword];
+          }
+          
+          if (!keyword) return null;
+
           const encodedKeyword = encodeURIComponent(keyword)
           const searchUrl = new URL(`/wp-json/wp/v2/tags?search=${encodedKeyword}`, activeWp.url)
           console.log(`Searching WP for tag: ${keyword} -> ${searchUrl}`)
@@ -300,11 +324,11 @@ ${data.rawScrapedText || '[No source content provided — write based on the tit
               id: matchToUse.id,
               name: matchToUse.name,
               link: matchToUse.link,
-              matched_keyword_in_text: keyword
+              matched_keywords_in_text: phrasesToLink
             }
           }
         } catch (e) {
-          console.error(`Tag search failed for ${keyword}:`, e)
+          console.error(`Tag search failed for item:`, e)
         }
         return null
       })
@@ -322,8 +346,11 @@ ${data.rawScrapedText || '[No source content provided — write based on the tit
       const authHeader = `Basic ${Buffer.from(`${activeWp.username}:${activeWp.password}`).toString('base64')}`
       
       // Use up to 3 keywords to find related articles
-      const postSearchPromises = aiOutput.suggested_keywords.slice(0, 3).map(async (keyword: string) => {
+      const postSearchPromises = aiOutput.suggested_keywords.slice(0, 3).map(async (kwItem: any) => {
         try {
+          const keyword = typeof kwItem === 'string' ? kwItem : kwItem.tag;
+          if (!keyword) return null;
+          
           const encodedKeyword = encodeURIComponent(keyword)
           const searchUrl = new URL(`/wp-json/wp/v2/posts?search=${encodedKeyword}&per_page=1&_fields=id,title,link`, activeWp.url)
           const res = await fetch(searchUrl.toString(), {
@@ -339,7 +366,7 @@ ${data.rawScrapedText || '[No source content provided — write based on the tit
             }
           }
         } catch (e) {
-          console.error(`Post search failed for ${keyword}:`, e)
+          console.error(`Post search failed for keyword:`, e)
         }
         return null
       })
@@ -365,16 +392,27 @@ ${data.rawScrapedText || '[No source content provided — write based on the tit
     
     if (verified_tags.length > 0) {
       verified_tags.forEach((tag) => {
-         const keywordToSearch = tag.matched_keyword_in_text;
-         if (keywordToSearch && tag.link) {
-           try {
-             const tagRegex = new RegExp(`(?![^<]*>)(\\b${escapeRegExp(keywordToSearch)}\\b)`, 'i')
-             processedHtml = processedHtml.replace(tagRegex, `<a href="${tag.link}" title="Link Internal: ${tag.link}" target="_blank" rel="noopener">$&</a>`)
-           } catch {
-             const fallbackRegex = new RegExp(`\\b${escapeRegExp(keywordToSearch)}\\b`, 'i')
-             processedHtml = processedHtml.replace(fallbackRegex, `<a href="${tag.link}" title="Link Internal: ${tag.link}" target="_blank" rel="noopener">$&</a>`)
-           }
-         }
+         const keywordsToSearch = tag.matched_keywords_in_text || [tag.matched_keyword_in_text];
+         let linkInjectedForThisTag = false;
+         
+         keywordsToSearch.forEach((keywordToSearch: string) => {
+             if (keywordToSearch && tag.link && !linkInjectedForThisTag) {
+               try {
+                 // Gunakan regex flag 'i' TANPA 'g' agar HANYA me-replace KEMUNCULAN PERTAMA
+                 const tagRegex = new RegExp(`(?![^<]*>)(\\b${escapeRegExp(keywordToSearch)}\\b)`, 'i')
+                 if (tagRegex.test(processedHtml)) {
+                     processedHtml = processedHtml.replace(tagRegex, `<a href="${tag.link}" title="Link Internal: ${tag.link}" target="_blank" rel="noopener">$&</a>`)
+                     linkInjectedForThisTag = true;
+                 }
+               } catch {
+                 const fallbackRegex = new RegExp(`\\b${escapeRegExp(keywordToSearch)}\\b`, 'i')
+                 if (fallbackRegex.test(processedHtml)) {
+                     processedHtml = processedHtml.replace(fallbackRegex, `<a href="${tag.link}" title="Link Internal: ${tag.link}" target="_blank" rel="noopener">$&</a>`)
+                     linkInjectedForThisTag = true;
+                 }
+               }
+             }
+         });
       })
     }
 
@@ -411,7 +449,13 @@ ${data.rawScrapedText || '[No source content provided — write based on the tit
     }
 
     aiOutput.content_raw_html = convertToGutenberg(processedHtml)
-    aiOutput.selected_tags = verified_tags // Re-map to expected UI param
+
+    // Deduplicate verified tags based on ID to avoid duplicate rendering in UI
+    const uniqueTagsMap = new Map()
+    verified_tags.forEach(t => {
+       if (!uniqueTagsMap.has(t.id)) uniqueTagsMap.set(t.id, t)
+    })
+    aiOutput.selected_tags = Array.from(uniqueTagsMap.values()) // Re-map to expected UI param
 
     return { data: aiOutput }
   } catch (error) {

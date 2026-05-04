@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, usePathname } from 'next/navigation'
-import { LogOut, Settings, LayoutDashboard, Menu, X, FileImage } from 'lucide-react'
+import { LogOut, Settings, LayoutDashboard, Menu, X, FileImage, CalendarDays } from 'lucide-react'
 
 export function Navbar() {
   const supabase = createClient()
@@ -66,6 +66,10 @@ export function Navbar() {
           <Link href="/artikel-mode" className={navClass('/artikel-mode')} onClick={closeMenu}>
             <FileImage className="w-5 h-5 md:w-4 md:h-4" />
             Artikel Mode
+          </Link>
+          <Link href="/jadwal" className={navClass('/jadwal')} onClick={closeMenu}>
+            <CalendarDays className="w-5 h-5 md:w-4 md:h-4" />
+            Jadwal
           </Link>
           <Link href="/settings" className={navClass('/settings')} onClick={closeMenu}>
             <Settings className="w-5 h-5 md:w-4 md:h-4" />

@@ -9,6 +9,30 @@ import { SourceTextEditor, ArticleHtmlEditor } from '@/components/rich-text-edit
 import { toast } from 'sonner'
 import { Loader2, Image as ImageIcon, Send, Sparkles, Trash2, X, Download, Languages } from 'lucide-react'
 
+const DEFAULT_DASHBOARD_PROMPT = `<p>You are an expert sports and news journalist. Write a comprehensive, engaging article in Bahasa Indonesia based on the provided title, source links, and highlights. SELURUH OUTPUT WAJIB DALAM BAHASA INDONESIA. Jangan gunakan bahasa lain selain Bahasa Indonesia.</p>
+<h3>CRITICAL RULES FOR CONTENT &amp; FORMATTING:</h3>
+<ol>
+  <li><strong>10 TITLES (REPRESENTATIVE &amp; SPOK):</strong> The provided 'Fix Judul' is ONLY A REFERENCE. You MUST generate EXACTLY 10 new, factual titles.
+    <ul>
+      <li>BATAS MAKSIMAL: Setiap judul MAKSIMAL 14 KATA. Jika lebih dari 14 kata, padatkan.</li>
+      <li>PUEBI/EYD TITLE CASE: Semua kata hubung dan kata depan WAJIB ditulis secara huruf kecil di judul!</li>
+      <li>GAYA BAHASA JURNALISTIK: Gunakan diksi berita yang luwes dan "punchy". Hindari bahasa formal yang terlalu kaku.</li>
+      <li>Strictly follow the SPOK (Subjek, Predikat, Objek, Keterangan) structure accurately without sensational clickbait.</li>
+    </ul>
+  </li>
+  <li><strong>QUOTES &amp; STATEMENTS:</strong> You MUST state the specific assigned source or person when writing a quote. CRITICAL HTML RULE: Whenever you include a direct statement, interview excerpt, or quote, you MUST wrap the ENTIRE quote and its attribution strictly inside an HTML &lt;blockquote&gt; tag. Example Format: <em>&lt;blockquote&gt;"Pertandingan yang sangat sulit, tapi kami bangga," ujar Jay Idzes.&lt;/blockquote&gt;</em></li>
+  <li><strong>LEAD PARAGRAPH (5W1H):</strong> The FIRST TWO paragraphs (&lt;p&gt;) of the article MUST be the "Lead". They MUST directly answer the Title and contain the 5W1H elements (What, Who, When, Where, Why, How) based on the scraped text. Do not start with empty fluff or filler sentences; get straight to the facts.</li>
+  <li><strong>ARTICLE STRUCTURE:</strong>
+    <ul>
+      <li>The HTML article MUST contain at least 2 subheadings (&lt;h2&gt; or &lt;h3&gt;).</li>
+      <li>The opening section before the first subheading MUST have at least 3 distinct paragraphs (&lt;p&gt;), starting with the 5W1H Lead.</li>
+      <li>Under EACH subheading, you MUST write at least 3 distinct paragraphs (&lt;p&gt;).</li>
+      <li>NEVER put internal links or &lt;a&gt; tags inside &lt;h2&gt; or &lt;h3&gt; subheadings.</li>
+    </ul>
+  </li>
+</ol>`;
+
+
 export function DashboardClient() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [isDrafting, setIsDrafting] = useState(false)
@@ -30,6 +54,7 @@ export function DashboardClient() {
   const [linkSumber, setLinkSumber] = useState('')
   const [sumberLain, setSumberLain] = useState('')
   const [highlights, setHighlights] = useState('')
+  const [customPrompt, setCustomPrompt] = useState(DEFAULT_DASHBOARD_PROMPT)
   // Dual-state text editor
   const [originalText, setOriginalText] = useState('')
   const [translatedText, setTranslatedText] = useState<string | null>(null)
@@ -51,6 +76,7 @@ export function DashboardClient() {
         if (d.linkSumber) setLinkSumber(d.linkSumber)
         if (d.sumberLain) setSumberLain(d.sumberLain)
         if (d.highlights) setHighlights(d.highlights)
+        if (d.customPrompt) setCustomPrompt(d.customPrompt)
         if (d.sumberGambarType) setSumberGambarType(d.sumberGambarType)
         if (d.sumberGambarUrl) setSumberGambarUrl(d.sumberGambarUrl)
       } catch (e) {}
@@ -59,12 +85,12 @@ export function DashboardClient() {
 
   useEffect(() => {
     localStorage.setItem('ai_wp_draft', JSON.stringify({
-      fixJudul, linkSumber, sumberLain, highlights, sumberGambarType, sumberGambarUrl
+      fixJudul, linkSumber, sumberLain, highlights, sumberGambarType, sumberGambarUrl, customPrompt
     }))
-  }, [fixJudul, linkSumber, sumberLain, highlights, sumberGambarType, sumberGambarUrl])
+  }, [fixJudul, linkSumber, sumberLain, highlights, sumberGambarType, sumberGambarUrl, customPrompt])
 
   const handleClearForm = () => {
-    setFixJudul(''); setLinkSumber(''); setSumberLain(''); setHighlights('');
+    setFixJudul(''); setLinkSumber(''); setSumberLain(''); setHighlights(''); setCustomPrompt(DEFAULT_DASHBOARD_PROMPT);
     setOriginalText(''); setTranslatedText(null); setViewMode('original');
     setSumberGambarType('Instagram'); setSumberGambarUrl('Foto: instagram.com/');
     localStorage.removeItem('ai_wp_draft');
@@ -244,6 +270,7 @@ export function DashboardClient() {
         linkSumber,
         sumberLain,
         highlights,
+        customPrompt,
         rawScrapedText: viewMode === 'translated' && translatedText ? translatedText : originalText,
         selectedWpSiteId: selectedWpSiteId || undefined,
         selectedApiKeyId: selectedApiKeyId || undefined,
@@ -441,6 +468,15 @@ export function DashboardClient() {
               value={highlights} onChange={e => setHighlights(e.target.value)} 
               className="input-field mt-1 min-h-[100px] resize-y" 
               placeholder="Poin penting yang wajib dibahas AI..."
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-gray-700 block mt-4">Full System Prompt (Bisa Diedit)</label>
+            <p className="text-[10px] text-gray-500 mb-2">Edit aturan judul, HTML, atau gaya bahasa. (Prompt Tag diatur di Settings).</p>
+            <ArticleHtmlEditor 
+              value={customPrompt} onChange={setCustomPrompt} 
+              minHeight="300px" 
             />
           </div>
 

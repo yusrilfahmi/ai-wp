@@ -7,7 +7,7 @@ import { getWpCategoriesAction, getWpSiteOptionsAction, getApiKeyOptionsAction }
 import { ImageCropper } from '@/components/image-cropper'
 import { ArticleHtmlEditor } from '@/components/rich-text-editor'
 import { toast } from 'sonner'
-import { Loader2, Image as ImageIcon, Send, Sparkles, Trash2, X, FileImage, Plus } from 'lucide-react'
+import { Loader2, Image as ImageIcon, Send, Sparkles, Trash2, X, FileImage, Plus, Edit, Check } from 'lucide-react'
 
 const MODES = [
   'Hasil Pertandingan (Sepak Bola)',
@@ -17,8 +17,76 @@ const MODES = [
   'Bagan Turnamen (Bracket)',
   'Hasil Laga Esports (Mobile Legends)',
   'Jadwal',
+  'Rating',
   'Artikel Lain'
 ]
+
+const getDefaultModePrompt = (modeName: string) => {
+  let specificRules = "";
+  let specificTitle = "";
+
+  if (modeName === 'Hasil Pertandingan') {
+    specificRules = 'Do NOT use the word "Akhir" in titles. Use "Hasil [Tim A] vs [Tim B] [Skor]".';
+    specificTitle = '<em>Contoh: "Hasil Manchester City vs Real Madrid 1-2: Puncak Drama VAR dan Gol Telat Vinicius Junior Benamkan Sepuluh Pemain Tuan Rumah"</em>';
+  } else if (modeName === 'Hasil Sementara') {
+    specificRules = 'Do NOT use the word "Akhir" in titles. Use "Hasil [Tim A] vs [Tim B] [Skor]".';
+    specificTitle = '<em>Contoh: "Hasil Sementara Indonesia vs Saint Kitts and Nevis 2-0: Dwigol Beckham Putra Bawa Skuad Garuda Memimpin di Paruh Pertama"</em>';
+  } else if (modeName === 'Klasemen') {
+    specificRules = 'You MUST include an HTML table representing the standings based on the image. Masukkan lengkap klasemen semua tim.';
+    specificTitle = '<em>Contoh: "Klasemen Lengkap Championship Liga Indonesia Grup A Pekan ke-22: Gilas FC Bekasi City 4-0, Garudayaksa Terus Bayangi Adhyaksa"</em>';
+  } else if (modeName === 'Top Skor') {
+    specificRules = 'You MUST include an HTML table representing the top scorers based on the image. Masukkan lengkap daftar top skor.';
+    specificTitle = '<em>Contoh: "Top Skor Liga 1 Musim 2024/2025: Cetak Hattrick, David da Silva Langsung Puncaki Daftar Pencetak Gol Terbanyak"</em>';
+  } else if (modeName === 'Rating Pemain' || modeName === 'Rating') {
+    specificRules = 'Do NOT use the word "Rapor". Use "Penilaian", "Nilai", or "Evaluasi".<br>You MUST include an HTML table (Posisi | Nama Pemain | Nilai). Tulis semua rating pemain ya, dan pisahkan satu tim satu sub bab.';
+    specificTitle = '<em>Contoh: "Penilaian Pemain Chelsea vs Paris Saint-Germain: Matvei Safonov Tampil Sempurna, Lini Belakang Tuan Rumah Terpuruk"</em>';
+  } else if (modeName === 'Bagan Turnamen') {
+    specificRules = 'Deskripsikan dengan detail bagan turnamen dari gambar.';
+    specificTitle = '<em>Contoh: "Bagan Perempat Final Liga Champions: Singkirkan Bayer Leverkusen, Arsenal Tantang Sporting CP"</em>';
+  } else if (modeName === 'Jadwal') {
+    specificRules = 'PENTING: Di mode ini Anda membuat artikel preview/jadwal laga. Gambar pertama = Jadwal Utama, Gambar kedua = Klasemen, Gambar ketiga = Statistik Head to Head. Rangkum info penting dari ketiganya secara urut.';
+    specificTitle = '<em>Contoh: "Jadwal Pertandingan Liga Inggris: Arsenal Menantang Manchester City di Emirates Stadium"</em>';
+  } else if (modeName === 'Hasil Laga Esports (Mobile Legends)') {
+    specificRules = 'Do not mention player names individually for hero drafts, just mention the team\'s overall hero composition.<br>ATURAN MUTLAK HERO DRAFT: JANGAN MENGARANG BEBAS NAMA HERO! AI harus melihat 1 per 1 wajah kecil hero yang ada di screenshot laga, lalu MENCOCOKKAN SECARA VISUAL SATU PER SATU wajah/ikon tersebut ke dalam daftar wajah yang ada di gambar referensi hero. Hanya tulis nama hero yang fotonya 100% identik di gambar referensi. Jika tidak yakin, tulis \'beberapa hero andalan\'. JANGAN menyebut hero yang wajahnya tidak ada!<br>Jika ada gambar klasemen tambahan, bahas klasemen tersebut.';
+    specificTitle = '<em>Contoh: "Hasil Bigetron Alpha vs Alter Ego 2-1: Sengit Hingga Gim Ketiga, Skuad Robot Merah Kunci Kemenangan"</em>';
+  } else {
+    // Artikel Lain
+    specificRules = 'Focus entirely on fulfilling the specific instructions from the MUTLAK HIGHLIGHT section provided by the user. Maintain the same high-quality journalism style as other modes.';
+    specificTitle = '<em>Contoh: Judul disesuaikan dengan fokus perintah pada instruksi MUTLAK HIGHLIGHT. Bebas namun tetap ikuti PUEBI/EYD SPOK journalism format.</em>';
+  }
+
+  return `<p>You are an expert sports journalist writing hard news articles in formal Indonesian (Bahasa Indonesia baku). SELURUH OUTPUT WAJIB DALAM BAHASA INDONESIA. Jangan gunakan bahasa lain selain Bahasa Indonesia dalam artikel, judul, meta description, maupun tag reasoning.</p>
+<h3>CRITICAL RULES FOR CONTENT &amp; FORMATTING:</h3>
+<ol>
+  <li><strong>MODE-SPECIFIC RULES (You are writing for mode: "${modeName}"):</strong><br>${specificRules}</li>
+  <li><strong>PLAYER NAMES &amp; TERMINOLOGY:</strong>
+    <ul>
+      <li>NEVER abbreviate player names (e.g., "Putra B." MUST be expanded to "Beckham Putra").</li>
+      <li>Translate foreign terms to standard Indonesian (e.g., injury time = masa tambahan waktu, leg = pertemuan).</li>
+    </ul>
+  </li>
+  <li><strong>HTML ARTICLE STRUCTURE (For "content_raw_html"):</strong>
+    <ul>
+      <li>The opening section before the first subheading MUST have at least 3 distinct paragraphs (&lt;p&gt;).</li>
+      <li>Include at least 2 subheadings using &lt;h2&gt; tags.</li>
+      <li>Under EACH &lt;h2&gt; subheading, write at least 3 distinct paragraphs (&lt;p&gt;).</li>
+      <li>Include properly formatted &lt;table&gt; tags if required by the mode.</li>
+      <li>NEVER put internal links or &lt;a&gt; tags inside &lt;h2&gt; or &lt;h3&gt; subheadings.</li>
+    </ul>
+  </li>
+  <li><strong>TITLES (STRICT FEW-SHOT EXAMPLES):</strong>
+    <ul>
+      <li>Generate EXACTLY 5 reference titles.</li>
+      <li>BATAS MAKSIMAL: Setiap judul MAKSIMAL 14 KATA. Jika lebih dari 14 kata, padatkan agar tetap informatif.</li>
+      <li>PUEBI/EYD TITLE CASE: Semua kata hubung dan kata depan WAJIB ditulis dengan huruf kecil di judul!</li>
+      <li>GAYA BAHASA JURNALISTIK: Gunakan diksi berita gaya olahraga yang luwes dan "punchy". Hindari kata awalan formal yang kaku.</li>
+      <li>FORMATTING: Titles MUST use a "Two-Part Structure" separated by a colon (:). Part 1 is the Core Fact. Part 2 is the Key Highlight in SPOK structure.</li>
+      <li>NEVER use clickbait, question marks, or exaggerated words.</li>
+      <li>YOU MUST MIMIC THIS EXACT PATTERN BASED ON THE MODE:<br>${specificTitle}</li>
+    </ul>
+  </li>
+</ol>`;
+};
 
 export function ArtikelModeClient() {
   const [isProcessing, setIsProcessing] = useState(false)
@@ -55,6 +123,73 @@ export function ArtikelModeClient() {
   
   const [sumberGambarType, setSumberGambarType] = useState('Instagram')
   const [sumberGambarUrl, setSumberGambarUrl] = useState('Foto: instagram.com/')
+
+  const [modeNotes, setModeNotes] = useState<Record<string, {id: string, text: string}[]>>({})
+  const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([])
+  const [newNoteText, setNewNoteText] = useState('')
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
+  const [modePrompts, setModePrompts] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const savedNotes = localStorage.getItem('ai_wp_mode_notes')
+    if (savedNotes) {
+      try {
+        setModeNotes(JSON.parse(savedNotes))
+      } catch (e) {}
+    }
+    const savedPrompts = localStorage.getItem('ai_wp_mode_prompts')
+    if (savedPrompts) {
+      try {
+        setModePrompts(JSON.parse(savedPrompts))
+      } catch (e) {}
+    }
+  }, [])
+  
+  const handlePromptChange = (val: string) => {
+    setModePrompts(prev => {
+      const newPrompts = { ...prev, [modeArtikel]: val }
+      localStorage.setItem('ai_wp_mode_prompts', JSON.stringify(newPrompts))
+      return newPrompts
+    })
+  }
+  
+  const handleSaveNote = () => {
+    if (!newNoteText.trim()) return
+    setModeNotes(prev => {
+      const currentNotes = prev[modeArtikel] || []
+      let updatedNotes
+      if (editingNoteId) {
+        updatedNotes = currentNotes.map(n => n.id === editingNoteId ? { ...n, text: newNoteText } : n)
+      } else {
+        updatedNotes = [...currentNotes, { id: Date.now().toString(), text: newNoteText }]
+      }
+      const newModeNotes = { ...prev, [modeArtikel]: updatedNotes }
+      localStorage.setItem('ai_wp_mode_notes', JSON.stringify(newModeNotes))
+      return newModeNotes
+    })
+    setNewNoteText('')
+    setEditingNoteId(null)
+  }
+
+  const handleDeleteNote = (id: string) => {
+    setModeNotes(prev => {
+      const currentNotes = prev[modeArtikel] || []
+      const updatedNotes = currentNotes.filter(n => n.id !== id)
+      const newModeNotes = { ...prev, [modeArtikel]: updatedNotes }
+      localStorage.setItem('ai_wp_mode_notes', JSON.stringify(newModeNotes))
+      return newModeNotes
+    })
+    setSelectedNoteIds(prev => prev.filter(selectedId => selectedId !== id))
+  }
+
+  const handleEditNote = (note: {id: string, text: string}) => {
+    setNewNoteText(note.text)
+    setEditingNoteId(note.id)
+  }
+  
+  const handleToggleNote = (id: string) => {
+    setSelectedNoteIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
 
   useEffect(() => {
     const saved = localStorage.getItem('ai_wp_artikel_draft')
@@ -269,11 +404,20 @@ export function ArtikelModeClient() {
       dynamicImages.forEach(img => formData.append('dynamicImages', img))
       formData.append('modeArtikel', modeArtikel)
       formData.append('sumberGambarUrl', sumberGambarUrl)
-      if (highlights) formData.append('highlights', highlights)
+
+      const activeNotes = (modeNotes[modeArtikel] || [])
+        .filter(n => selectedNoteIds.includes(n.id))
+        .map(n => n.text)
+      const finalHighlights = [highlights, ...activeNotes].filter(Boolean).join('\n\n')
+
+      if (finalHighlights) formData.append('highlights', finalHighlights)
       if (penjelasanGambar) formData.append('penjelasanGambar', penjelasanGambar)
       if (selectedWpSiteId) formData.append('selectedWpSiteId', selectedWpSiteId)
       if (selectedApiKeyId) formData.append('selectedApiKeyId', selectedApiKeyId)
       if (selectedModelOverride) formData.append('selectedModelOverride', selectedModelOverride)
+      
+      const currentPrompt = modePrompts[modeArtikel] !== undefined ? modePrompts[modeArtikel] : getDefaultModePrompt(modeArtikel)
+      formData.append('customPrompt', currentPrompt)
 
       const res = await processImageContentAction(formData)
 
@@ -465,7 +609,7 @@ export function ArtikelModeClient() {
             </div>
           )}
 
-          {modeArtikel === 'Artikel Lain' && imageData && (
+          {imageData && (
             <div className="space-y-4 bg-purple-50/30 p-4 rounded-xl border border-purple-100">
                <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-purple-800">Gambar Data Tambahan</label>
@@ -592,9 +736,90 @@ export function ArtikelModeClient() {
              </label>
              <textarea 
                value={highlights} onChange={e => setHighlights(e.target.value)} 
-               className="input-field mt-1 min-h-[100px] resize-y" 
+               className="input-field mt-1 min-h-[100px] resize-y mb-3" 
                placeholder="Poin penting yang wajib dibahas AI condong ke apa..."
              />
+             
+             {/* Notes Feature for current mode */}
+             <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mt-2">
+               <div className="flex items-center justify-between mb-2">
+                 <label className="text-sm font-medium text-gray-700">Notes (Khusus mode: {modeArtikel})</label>
+                 <span className="text-xs text-gray-500">{modeNotes[modeArtikel]?.length || 0} tersimpan</span>
+               </div>
+               
+               <div className="flex gap-2 mb-3">
+                 <input 
+                   type="text" 
+                   value={newNoteText} 
+                   onChange={e => setNewNoteText(e.target.value)} 
+                   placeholder="Tambahkan catatan baru..." 
+                   className="input-field text-sm"
+                   onKeyDown={e => e.key === 'Enter' && handleSaveNote()}
+                 />
+                 <button 
+                   type="button" 
+                   onClick={handleSaveNote} 
+                   disabled={!newNoteText.trim()}
+                   className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md text-sm font-medium disabled:opacity-50 flex items-center gap-1 whitespace-nowrap transition-colors"
+                 >
+                   {editingNoteId ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                   {editingNoteId ? 'Simpan' : 'Tambah'}
+                 </button>
+                 {editingNoteId && (
+                   <button 
+                     type="button" 
+                     onClick={() => { setEditingNoteId(null); setNewNoteText(''); }}
+                     className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                   >
+                     Batal
+                   </button>
+                 )}
+               </div>
+               
+               {modeNotes[modeArtikel] && modeNotes[modeArtikel].length > 0 && (
+                 <div className="space-y-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+                   {modeNotes[modeArtikel].map(note => (
+                     <div key={note.id} className="flex items-start gap-2 p-2 bg-white border border-gray-200 rounded-md hover:border-blue-300 transition-colors group">
+                       <input 
+                         type="checkbox" 
+                         checked={selectedNoteIds.includes(note.id)}
+                         onChange={() => handleToggleNote(note.id)}
+                         className="accent-blue-600 mt-0.5 cursor-pointer w-4 h-4 rounded border-gray-300 flex-shrink-0"
+                       />
+                       <span className="text-sm text-gray-700 flex-1 break-words">{note.text}</span>
+                       <div className="flex items-center gap-1 flex-shrink-0 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+                         <button 
+                           type="button" 
+                           onClick={() => handleEditNote(note)}
+                           className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                           title="Edit Note"
+                         >
+                           <Edit className="w-3.5 h-3.5" />
+                         </button>
+                         <button 
+                           type="button" 
+                           onClick={() => handleDeleteNote(note.id)}
+                           className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                           title="Hapus Note"
+                         >
+                           <Trash2 className="w-3.5 h-3.5" />
+                         </button>
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+               )}
+             </div>
+             
+             <div className="mt-4">
+               <label className="text-sm font-medium text-gray-700 block mt-4">Full System Prompt (Bisa Diedit Khusus Mode {modeArtikel})</label>
+               <p className="text-[10px] text-gray-500 mb-2">Edit aturan judul, HTML, atau gaya bahasa. (Prompt Tag diatur di Settings).</p>
+               <ArticleHtmlEditor
+                 value={modePrompts[modeArtikel] !== undefined ? modePrompts[modeArtikel] : getDefaultModePrompt(modeArtikel)}
+                 onChange={handlePromptChange}
+                 minHeight="300px"
+               />
+             </div>
           </div>
 
           <div>
