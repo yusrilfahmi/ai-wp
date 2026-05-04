@@ -271,7 +271,7 @@ ${penjelasanGambar ? `Penjelasan Gambar: ${penjelasanGambar}\n` : ''}${highlight
     }
 
     // Phase 3: Dynamic WP Tag Search — use selected or global active WP site
-    let verified_tags: Array<{id: number, name: string, link: string, matched_keyword_in_text: string}> = []
+    let verified_tags: Array<{id: number, name: string, link: string, matched_keyword_in_text: string, matched_keywords_in_text?: string[]}> = []
     
     const allWpSites = parseWpSites(settings.wp_site_url, settings.wp_username, settings.wp_app_password)
     const activeWp = selectedWpSiteId
